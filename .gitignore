@@ -1,0 +1,5 @@
+.cache/
+.ccls-cache/
+.direnv/
+compile_commands.json
+build/
