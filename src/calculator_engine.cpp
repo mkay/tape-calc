@@ -1,6 +1,4 @@
 #include "calculator_engine.h"
-#include <iostream>
-#include <cmath>
 #include <cmath>
 
 CalculatorEngine::CalculatorEngine()
@@ -47,9 +45,6 @@ void CalculatorEngine::inputDecimalPoint() {
         m_input_buffer += ".";
         m_has_decimal_point = true;
     }
-
-    // Debug output
-    std::cout << "After inputDecimalPoint(): buffer = '" << m_input_buffer << "'" << std::endl;
 }
 
 void CalculatorEngine::backspace() {
@@ -394,10 +389,8 @@ double CalculatorEngine::parseInput() const {
 
             result = int_value + frac_value;
         }
-        std::cout << "parseInput(): buffer = '" << m_input_buffer << "' -> " << result << std::endl;
         return result;
     } catch (...) {
-        std::cout << "parseInput(): EXCEPTION parsing '" << m_input_buffer << "'" << std::endl;
         return 0.0;
     }
 }

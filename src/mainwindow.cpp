@@ -791,7 +791,10 @@ void MainWindow::on_edit_tape_clicked() {
                     value_str = value_str.substr(0, end + 1);
                 }
 
-                // Parse the number (handle comma as decimal separator)
+                // Parse the number (handle European format: period as thousands separator, comma as decimal)
+                // First remove all periods (thousands separators)
+                value_str.erase(std::remove(value_str.begin(), value_str.end(), '.'), value_str.end());
+                // Then replace comma with period (decimal separator for C locale)
                 std::replace(value_str.begin(), value_str.end(), ',', '.');
 
                 // Parse using C locale to ensure '.' is recognized as decimal separator
