@@ -29,6 +29,8 @@ MainWindow::MainWindow(const Glib::RefPtr<Gtk::Application>& app)
     , HEIGHT(420)
     , m_updating_tape(false)
     , m_tape_edit_mode(false)
+    , m_is_modified(false)
+    , m_current_file_path("")
 {
     set_title(APPNAME);
     set_default_size(WIDTH, HEIGHT);
@@ -271,6 +273,10 @@ MainWindow::MainWindow(const Glib::RefPtr<Gtk::Application>& app)
         sigc::mem_fun(*this, &MainWindow::on_key_pressed), false);
     add_controller(key_controller);
 
+    // Setup close request handler for unsaved changes warning
+    signal_close_request().connect(
+        sigc::mem_fun(*this, &MainWindow::on_close_request), false);
+
     // Load saved settings (VAT rate, decimal places, etc.)
     load_settings();
 
@@ -295,6 +301,11 @@ void MainWindow::setup_menu() {
     action_open->signal_activate().connect(sigc::hide(sigc::mem_fun(*this, &MainWindow::on_action_open)));
     m_app->add_action(action_open);
 
+    auto action_save = Gio::SimpleAction::create("save");
+    action_save->signal_activate().connect(sigc::hide(sigc::mem_fun(*this, &MainWindow::on_action_save)));
+    action_save->set_enabled(false);  // Initially disabled (no file opened)
+    m_app->add_action(action_save);
+
     auto action_save_as = Gio::SimpleAction::create("save-as");
     action_save_as->signal_activate().connect(sigc::hide(sigc::mem_fun(*this, &MainWindow::on_action_save_as)));
     m_app->add_action(action_save_as);
@@ -308,16 +319,6 @@ void MainWindow::setup_menu() {
     m_app->add_action(action_quit);
 
     // Create edit actions (initially disabled)
-    auto action_undo = Gio::SimpleAction::create("undo");
-    action_undo->signal_activate().connect(sigc::hide(sigc::mem_fun(*this, &MainWindow::on_action_undo)));
-    action_undo->set_enabled(false);
-    m_app->add_action(action_undo);
-
-    auto action_redo = Gio::SimpleAction::create("redo");
-    action_redo->signal_activate().connect(sigc::hide(sigc::mem_fun(*this, &MainWindow::on_action_redo)));
-    action_redo->set_enabled(false);
-    m_app->add_action(action_redo);
-
     auto action_cut = Gio::SimpleAction::create("cut");
     action_cut->signal_activate().connect(sigc::hide(sigc::mem_fun(*this, &MainWindow::on_action_cut)));
     action_cut->set_enabled(false);
@@ -338,6 +339,11 @@ void MainWindow::setup_menu() {
     action_select_all->set_enabled(false);
     m_app->add_action(action_select_all);
 
+    auto action_copy_total = Gio::SimpleAction::create("copy-total");
+    action_copy_total->signal_activate().connect(sigc::hide(sigc::mem_fun(*this, &MainWindow::on_action_copy_total)));
+    action_copy_total->set_enabled(false);  // Initially disabled until there's a result
+    m_app->add_action(action_copy_total);
+
     auto action_documentation = Gio::SimpleAction::create("documentation");
     action_documentation->signal_activate().connect(sigc::hide(sigc::mem_fun(*this, &MainWindow::on_action_documentation)));
     m_app->add_action(action_documentation);
@@ -346,15 +352,15 @@ void MainWindow::setup_menu() {
     m_app->set_accel_for_action("app.edit-mode", "<Primary>e");
     m_app->set_accel_for_action("app.new", "<Primary>n");
     m_app->set_accel_for_action("app.open", "<Primary>o");
+    m_app->set_accel_for_action("app.save", "<Primary>s");
     m_app->set_accel_for_action("app.save-as", "<Primary><Shift>s");
     m_app->set_accel_for_action("app.new-window", "<Primary><Shift>n");
     m_app->set_accel_for_action("app.quit", "<Primary>q");
-    m_app->set_accel_for_action("app.undo", "<Primary>z");
-    m_app->set_accel_for_action("app.redo", "<Primary><Shift>z");
     m_app->set_accel_for_action("app.cut", "<Primary>x");
     m_app->set_accel_for_action("app.copy", "<Primary>c");
     m_app->set_accel_for_action("app.paste", "<Primary>v");
     m_app->set_accel_for_action("app.select-all", "<Primary>a");
+    m_app->set_accel_for_action("app.copy-total", "<Primary><Shift>c");
 
     // Create menu bar
     auto menu_bar = Gio::Menu::create();
@@ -368,6 +374,7 @@ void MainWindow::setup_menu() {
     m_recent_files_menu = Gio::Menu::create();
     file_menu->append_submenu("Open _Recent", m_recent_files_menu);
 
+    file_menu->append("_Save", "app.save");
     file_menu->append("Save _As...", "app.save-as");
     file_menu->append("New _Window", "app.new-window");
     file_menu->append("_Quit", "app.quit");
@@ -380,12 +387,11 @@ void MainWindow::setup_menu() {
     // Edit menu
     auto edit_menu = Gio::Menu::create();
     edit_menu->append("_Edit Mode", "app.edit-mode");
-    edit_menu->append("_Undo", "app.undo");
-    edit_menu->append("_Redo", "app.redo");
     edit_menu->append("Cu_t", "app.cut");
     edit_menu->append("_Copy", "app.copy");
     edit_menu->append("_Paste", "app.paste");
     edit_menu->append("Select _All", "app.select-all");
+    edit_menu->append("Copy _Total", "app.copy-total");
     menu_bar->append_submenu("_Edit", edit_menu);
 
     // Help menu
@@ -401,12 +407,6 @@ void MainWindow::setup_menu() {
 void MainWindow::update_edit_menu_sensitivity() {
     // Enable/disable edit menu items based on edit mode
     bool in_edit_mode = m_tape_edit_mode;
-
-    auto action_undo = std::dynamic_pointer_cast<Gio::SimpleAction>(m_app->lookup_action("undo"));
-    if (action_undo) action_undo->set_enabled(in_edit_mode);
-
-    auto action_redo = std::dynamic_pointer_cast<Gio::SimpleAction>(m_app->lookup_action("redo"));
-    if (action_redo) action_redo->set_enabled(in_edit_mode);
 
     auto action_cut = std::dynamic_pointer_cast<Gio::SimpleAction>(m_app->lookup_action("cut"));
     if (action_cut) action_cut->set_enabled(in_edit_mode);
@@ -457,6 +457,17 @@ void MainWindow::on_action_open() {
                 // Clear current tape
                 m_engine.clear();
 
+                // First pass: collect all lines and parse them
+                struct ParsedLine {
+                    char operation;
+                    double value;
+                    bool is_vat;
+                    double vat_rate;
+                    double vat_amount;
+                    bool is_separator;
+                };
+                std::vector<ParsedLine> parsed_lines;
+
                 std::string line;
                 while (std::getline(infile, line)) {
                     // Skip empty lines
@@ -464,7 +475,7 @@ void MainWindow::on_action_open() {
 
                     // Check if it's a separator line
                     if (line.find("---") != std::string::npos) {
-                        m_engine.loadTapeEntry(TapeEntry::separator());
+                        parsed_lines.push_back({' ', 0.0, false, 0.0, 0.0, true});
                         continue;
                     }
 
@@ -512,32 +523,67 @@ void MainWindow::on_action_open() {
                         try {
                             double vat_rate = std::stod(vat_rate_str) / 100.0;
                             double vat_amount = std::stod(vat_amount_str);
-
-                            // Create VAT entry
-                            char vat_op = (operation == '+') ? 'V' : 'v';
-                            TapeEntry entry(vat_amount, vat_op, "", true, vat_rate, vat_amount);
-                            m_engine.loadTapeEntry(entry);
+                            parsed_lines.push_back({operation, vat_amount, true, vat_rate, vat_amount, false});
                         } catch (...) {
                             // Skip invalid VAT line
                         }
                         continue;
                     }
 
-                    // Parse regular value (replace comma with period for parsing)
+                    // Trim whitespace from value string
+                    value_str.erase(0, value_str.find_first_not_of(" \t\r\n"));
+                    value_str.erase(value_str.find_last_not_of(" \t\r\n") + 1);
+
+                    // Parse the number (handle European format: period as thousands separator, comma as decimal)
+                    // First remove all periods (thousands separators)
+                    value_str.erase(std::remove(value_str.begin(), value_str.end(), '.'), value_str.end());
+                    // Then replace comma with period (decimal separator for C locale)
                     std::replace(value_str.begin(), value_str.end(), ',', '.');
 
-                    try {
-                        double value = std::stod(value_str);
-
-                        // Create tape entry
-                        TapeEntry entry(value, operation, "", false);
-                        m_engine.loadTapeEntry(entry);
-                    } catch (...) {
-                        // Skip invalid line
+                    // Parse using C locale to ensure '.' is recognized as decimal separator
+                    std::istringstream iss(value_str);
+                    iss.imbue(std::locale("C"));
+                    double value = 0.0;
+                    if (iss >> value) {
+                        parsed_lines.push_back({operation, value, false, 0.0, 0.0, false});
                     }
                 }
 
                 infile.close();
+
+                // Second pass: create tape entries with corrected operations
+                // The displayed operation is the one applied TO that value
+                // But TapeEntry stores the NEXT operation, so we need to shift
+                for (size_t i = 0; i < parsed_lines.size(); i++) {
+                    const auto& curr = parsed_lines[i];
+
+                    if (curr.is_separator) {
+                        m_engine.loadTapeEntry(TapeEntry::separator());
+                        continue;
+                    }
+
+                    // Determine the operation to store (the NEXT operation)
+                    char next_operation = '\0';
+                    if (i + 1 < parsed_lines.size() && !parsed_lines[i + 1].is_separator) {
+                        next_operation = parsed_lines[i + 1].operation;
+                    } else {
+                        // Last entry before separator or end - use current operation
+                        next_operation = curr.operation;
+                    }
+
+                    if (curr.is_vat) {
+                        char vat_op = (curr.operation == '+') ? 'V' : 'v';
+                        TapeEntry entry(curr.value, vat_op, "", true, curr.vat_rate, curr.vat_amount);
+                        m_engine.loadTapeEntry(entry);
+                    } else if (curr.operation != '=') {
+                        TapeEntry entry(curr.value, next_operation, "", false);
+                        m_engine.loadTapeEntry(entry);
+                    } else {
+                        // Result line
+                        TapeEntry entry(curr.value, '=', "", false);
+                        m_engine.loadTapeEntry(entry);
+                    }
+                }
 
                 // Recalculate from loaded tape
                 m_engine.recalculateFromTape();
@@ -550,11 +596,21 @@ void MainWindow::on_action_open() {
 
                 // Add to recent files
                 add_recent_file(path);
+
+                // Update file state
+                m_current_file_path = path;
+                set_modified(false);
             }
         } catch (const Glib::Error& e) {
             // User cancelled or error occurred
         }
     });
+}
+
+void MainWindow::on_action_save() {
+    if (!m_current_file_path.empty()) {
+        save_to_file(m_current_file_path);
+    }
 }
 
 void MainWindow::on_action_save_as() {
@@ -570,15 +626,6 @@ void MainWindow::on_action_new_window() {
 
 void MainWindow::on_action_quit() {
     m_app->quit();
-}
-
-void MainWindow::on_action_undo() {
-    on_backspace_clicked();
-}
-
-void MainWindow::on_action_redo() {
-    // Redo functionality not yet implemented
-    // Would need to add redo history to calculator engine
 }
 
 void MainWindow::on_action_cut() {
@@ -605,6 +652,13 @@ void MainWindow::on_action_paste() {
 void MainWindow::on_action_select_all() {
     // Select all text in tape view
     m_tape_buffer->select_range(m_tape_buffer->begin(), m_tape_buffer->end());
+}
+
+void MainWindow::on_action_copy_total() {
+    // Copy the current result/total to clipboard
+    std::string result = m_engine.getResult();
+    auto clipboard = get_clipboard();
+    clipboard->set_text(result);
 }
 
 void MainWindow::on_action_documentation() {
@@ -771,6 +825,17 @@ void MainWindow::on_action_open_recent(const std::string& file_path) {
         // Clear current tape
         m_engine.clear();
 
+        // First pass: collect all lines and parse them
+        struct ParsedLine {
+            char operation;
+            double value;
+            bool is_vat;
+            double vat_rate;
+            double vat_amount;
+            bool is_separator;
+        };
+        std::vector<ParsedLine> parsed_lines;
+
         std::string line;
         while (std::getline(infile, line)) {
             // Skip empty lines
@@ -778,7 +843,7 @@ void MainWindow::on_action_open_recent(const std::string& file_path) {
 
             // Check if it's a separator line
             if (line.find("---") != std::string::npos) {
-                m_engine.loadTapeEntry(TapeEntry::separator());
+                parsed_lines.push_back({' ', 0.0, false, 0.0, 0.0, true});
                 continue;
             }
 
@@ -823,29 +888,67 @@ void MainWindow::on_action_open_recent(const std::string& file_path) {
                 try {
                     double vat_rate = std::stod(vat_rate_str) / 100.0;
                     double vat_amount = std::stod(vat_amount_str);
-
-                    char vat_op = (operation == '+') ? 'V' : 'v';
-                    TapeEntry entry(vat_amount, vat_op, "", true, vat_rate, vat_amount);
-                    m_engine.loadTapeEntry(entry);
+                    parsed_lines.push_back({operation, vat_amount, true, vat_rate, vat_amount, false});
                 } catch (...) {
                     // Skip invalid VAT line
                 }
                 continue;
             }
 
-            // Parse regular value
+            // Trim whitespace from value string
+            value_str.erase(0, value_str.find_first_not_of(" \t\r\n"));
+            value_str.erase(value_str.find_last_not_of(" \t\r\n") + 1);
+
+            // Parse the number (handle European format: period as thousands separator, comma as decimal)
+            // First remove all periods (thousands separators)
+            value_str.erase(std::remove(value_str.begin(), value_str.end(), '.'), value_str.end());
+            // Then replace comma with period (decimal separator for C locale)
             std::replace(value_str.begin(), value_str.end(), ',', '.');
 
-            try {
-                double value = std::stod(value_str);
-                TapeEntry entry(value, operation, "", false);
-                m_engine.loadTapeEntry(entry);
-            } catch (...) {
-                // Skip invalid line
+            // Parse using C locale to ensure '.' is recognized as decimal separator
+            std::istringstream iss(value_str);
+            iss.imbue(std::locale("C"));
+            double value = 0.0;
+            if (iss >> value) {
+                parsed_lines.push_back({operation, value, false, 0.0, 0.0, false});
             }
         }
 
         infile.close();
+
+        // Second pass: create tape entries with corrected operations
+        // The displayed operation is the one applied TO that value
+        // But TapeEntry stores the NEXT operation, so we need to shift
+        for (size_t i = 0; i < parsed_lines.size(); i++) {
+            const auto& curr = parsed_lines[i];
+
+            if (curr.is_separator) {
+                m_engine.loadTapeEntry(TapeEntry::separator());
+                continue;
+            }
+
+            // Determine the operation to store (the NEXT operation)
+            char next_operation = '\0';
+            if (i + 1 < parsed_lines.size() && !parsed_lines[i + 1].is_separator) {
+                next_operation = parsed_lines[i + 1].operation;
+            } else {
+                // Last entry before separator or end - use current operation
+                next_operation = curr.operation;
+            }
+
+            if (curr.is_vat) {
+                char vat_op = (curr.operation == '+') ? 'V' : 'v';
+                TapeEntry entry(curr.value, vat_op, "", true, curr.vat_rate, curr.vat_amount);
+                m_engine.loadTapeEntry(entry);
+            } else if (curr.operation != '=') {
+                TapeEntry entry(curr.value, next_operation, "", false);
+                m_engine.loadTapeEntry(entry);
+            } else {
+                // Result line
+                TapeEntry entry(curr.value, '=', "", false);
+                m_engine.loadTapeEntry(entry);
+            }
+        }
 
         // Recalculate from loaded tape
         m_engine.recalculateFromTape();
@@ -858,6 +961,10 @@ void MainWindow::on_action_open_recent(const std::string& file_path) {
 
         // Add to recent files
         add_recent_file(file_path);
+
+        // Update file state
+        m_current_file_path = file_path;
+        set_modified(false);
     }
 }
 
@@ -1066,17 +1173,20 @@ void MainWindow::create_operation_button(const Glib::ustring& label, char op, in
 void MainWindow::on_number_clicked(int digit) {
     m_engine.inputDigit(digit);
     update_displays();
+    set_modified(true);
 }
 
 void MainWindow::on_operation_clicked(char op) {
     m_engine.performOperation(op);
     update_displays();
+    set_modified(true);
 }
 
 void MainWindow::on_equals_clicked() {
     m_engine.calculateEquals();
     update_displays();
     m_edit_tape_button.set_visible(true);  // Show EDIT button after calculation
+    set_modified(true);
 }
 
 void MainWindow::on_clear_clicked() {
@@ -1092,6 +1202,8 @@ void MainWindow::on_clear_clicked() {
     m_engine.clear();
     update_displays();
     m_edit_tape_button.set_visible(false);  // Hide EDIT button when cleared
+    m_current_file_path = "";  // Clear current file
+    set_modified(false);
 }
 
 void MainWindow::on_backspace_clicked() {
@@ -1103,26 +1215,31 @@ void MainWindow::on_backspace_clicked() {
         m_engine.backspace();
     }
     update_displays();
+    set_modified(true);
 }
 
 void MainWindow::on_decimal_clicked() {
     m_engine.inputDecimalPoint();
     update_displays();
+    set_modified(true);
 }
 
 void MainWindow::on_percent_clicked() {
     m_engine.calculatePercentage();
     update_displays();
+    set_modified(true);
 }
 
 void MainWindow::on_add_vat_clicked() {
     m_engine.addVAT();
     update_displays();
+    set_modified(true);
 }
 
 void MainWindow::on_subtract_vat_clicked() {
     m_engine.subtractVAT();
     update_displays();
+    set_modified(true);
 }
 
 void MainWindow::on_vat_rate_changed() {
@@ -1166,25 +1283,12 @@ void MainWindow::on_save_tape_clicked() {
         try {
             auto file = std::dynamic_pointer_cast<Gtk::FileDialog>(result->get_source_object_base())->save_finish(result);
             if (file) {
-                // Get the tape content
-                std::string tape_content = m_tape_buffer->get_text();
-
-                // Write to file
                 std::string file_path = file->get_path();
-                std::ofstream outfile(file_path);
-                if (outfile.is_open()) {
-                    outfile << tape_content;
-                    outfile.close();
-
-                    // Add to recent files
-                    add_recent_file(file_path);
-                }
+                save_to_file(file_path);
             }
         } catch (const Gtk::DialogError& err) {
             // User cancelled, ignore
         } catch (const Glib::Error& err) {
-            g_warning("Error saving file: %s", err.what());
-        } catch (const std::exception& err) {
             g_warning("Error saving file: %s", err.what());
         }
     });
@@ -1211,6 +1315,14 @@ void MainWindow::update_displays() {
 
     // Update tape (will show current input as you type)
     update_tape();
+
+    // Update Copy Total action sensitivity - enable when there's a result to copy
+    auto action_copy_total = std::dynamic_pointer_cast<Gio::SimpleAction>(m_app->lookup_action("copy-total"));
+    if (action_copy_total) {
+        // Enable if there are tape entries (meaning there's a calculation)
+        bool has_result = !m_engine.getTapeHistory().empty();
+        action_copy_total->set_enabled(has_result);
+    }
 }
 
 void MainWindow::update_tape() {
@@ -1486,6 +1598,7 @@ void MainWindow::on_edit_tape_clicked() {
 
         // Update display with recalculated tape
         update_displays();
+        set_modified(true);  // Mark as modified after editing
     }
 }
 
@@ -1688,4 +1801,113 @@ void MainWindow::save_settings() {
     config_file << "# This file is auto-generated\n\n";
     config_file << "vat_rate=" << m_vat_rate_spin.get_value() << "\n";
     config_file << "decimal_places=" << m_decimal_places_spin.get_value() << "\n";
+}
+
+// File state management methods
+void MainWindow::set_modified(bool modified) {
+    m_is_modified = modified;
+    update_window_title();
+
+    // Enable/disable Save menu item based on whether a file is currently open
+    auto action_save = std::dynamic_pointer_cast<Gio::SimpleAction>(m_app->lookup_action("save"));
+    if (action_save) {
+        action_save->set_enabled(!m_current_file_path.empty());
+    }
+}
+
+void MainWindow::update_window_title() {
+    std::string title = APPNAME;
+
+    if (!m_current_file_path.empty()) {
+        // Extract filename from path
+        std::filesystem::path path(m_current_file_path);
+        title += " - " + path.filename().string();
+    }
+
+    if (m_is_modified) {
+        title += "*";
+    }
+
+    set_title(title);
+}
+
+bool MainWindow::check_unsaved_changes() {
+    if (!m_is_modified) {
+        return true;  // No unsaved changes, proceed
+    }
+
+    // Create alert dialog
+    auto dialog = Gtk::AlertDialog::create("Save changes?");
+    dialog->set_detail("Do you want to save the changes before closing?");
+    dialog->set_buttons({"Cancel", "Don't Save", "Save"});
+    dialog->set_cancel_button(0);
+    dialog->set_default_button(2);
+
+    // Show dialog synchronously (blocking)
+    dialog->choose(*this, [this](const Glib::RefPtr<Gio::AsyncResult>& result) {
+        auto dialog = std::dynamic_pointer_cast<Gtk::AlertDialog>(result->get_source_object_base());
+        try {
+            int button = dialog->choose_finish(result);
+
+            if (button == 2) {  // Save
+                if (!m_current_file_path.empty()) {
+                    // Save to current file
+                    save_to_file(m_current_file_path);
+                } else {
+                    // No current file, trigger Save As
+                    on_action_save_as();
+                }
+            } else if (button == 1) {  // Don't Save
+                // Just close without saving
+                m_is_modified = false;
+                close();
+            }
+            // button == 0 is Cancel, do nothing
+        } catch (const Gtk::DialogError& e) {
+            // User cancelled or closed dialog
+        }
+    });
+
+    return false;  // Prevent default close action, we'll handle it in the callback
+}
+
+bool MainWindow::save_to_file(const std::string& file_path) {
+    try {
+        // Get the tape content
+        std::string tape_content = m_tape_buffer->get_text();
+
+        // Write to file
+        std::ofstream outfile(file_path);
+        if (!outfile.is_open()) {
+            auto error_dialog = Gtk::AlertDialog::create("Error saving file");
+            error_dialog->set_detail("Could not write to: " + file_path);
+            error_dialog->show(*this);
+            return false;
+        }
+
+        outfile << tape_content;
+        outfile.close();
+
+        // Update state
+        m_current_file_path = file_path;
+        set_modified(false);
+
+        // Add to recent files
+        add_recent_file(file_path);
+
+        return true;
+    } catch (const std::exception& e) {
+        auto error_dialog = Gtk::AlertDialog::create("Error saving file");
+        error_dialog->set_detail(e.what());
+        error_dialog->show(*this);
+        return false;
+    }
+}
+
+bool MainWindow::on_close_request() {
+    if (m_is_modified) {
+        check_unsaved_changes();
+        return true;  // Prevent close, we'll handle it in the dialog callback
+    }
+    return false;  // Allow close
 }

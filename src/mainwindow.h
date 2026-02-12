@@ -97,15 +97,15 @@ protected:
   void on_action_new();
   void on_action_open();
   void on_action_open_recent(const std::string& file_path);
+  void on_action_save();
   void on_action_save_as();
   void on_action_new_window();
   void on_action_quit();
-  void on_action_undo();
-  void on_action_redo();
   void on_action_cut();
   void on_action_copy();
   void on_action_paste();
   void on_action_select_all();
+  void on_action_copy_total();
   void on_action_documentation();
 
   // Settings methods
@@ -116,11 +116,24 @@ protected:
   // Keyboard handler
   bool on_key_pressed(guint keyval, guint keycode, Gdk::ModifierType state);
 
+  // File state management
+  void set_modified(bool modified);
+  void update_window_title();
+  bool check_unsaved_changes();  // Returns false if user cancels
+  bool save_to_file(const std::string& file_path);
+
+  // Window close handler
+  bool on_close_request() override;
+
 private:
   bool m_updating_tape;
   bool m_tape_edit_mode;
   std::vector<std::string> m_recent_files;
   Glib::RefPtr<Gio::Menu> m_recent_files_menu;
+
+  // File state tracking
+  bool m_is_modified;
+  std::string m_current_file_path;
 };
 
 #endif

@@ -9,14 +9,17 @@ A modern GTK4-based tape calculator with a professional adding machine interface
 - **Basic operations**: Addition, Subtraction, Multiplication, Division, Percentage
 - **VAT calculations**: Add/subtract VAT with configurable rates (e.g., `100 +VAT(19%)` → `119,00`)
 - **Editable tape** - modify operations and recalculate results
-- **File operations**: New, Open, Save As with timestamped filenames (e.g., `calc-260212-1430.txt`)
+- **File operations**: New, Open, Save, Save As with timestamped filenames (e.g., `calc-260212-1430.txt`)
+- **Smart file tracking**: Modified indicator (*) in title bar, unsaved changes warning on close
+- **Quick Save**: Save to current file with Ctrl+S
 - **Open Recent**: Quickly access last 10 opened/saved calculations
+- **Copy Total**: Copy result to clipboard with Shift+Ctrl+C
 - **Full menu bar**: File, Edit, and Help menus with keyboard shortcuts
 - **Edit mode**: Enable Cut, Copy, Paste, and Select All operations when editing
 - **Configurable decimal places**: 0-6 decimal places
 - **Theme-aware**: Automatically adapts to your GTK theme (light/dark)
 - **Settings persistence**: VAT rate, decimal places, and recent files saved between sessions
-- **Locale-independent parsing**: Works correctly with both period and comma input
+- **Robust parsing**: Handles European number formats (comma as decimal, period as thousands separator)
 
 ### Keyboard Support
 
@@ -31,8 +34,8 @@ A modern GTK4-based tape calculator with a professional adding machine interface
 | `Delete` or `Esc` | Clear all |
 
 **Menus:**
-- Ctrl+N: New | Ctrl+O: Open | Ctrl+Shift+S: Save As | Ctrl+Shift+N: New Window | Ctrl+Q: Quit
-- Ctrl+E: Edit Mode | Ctrl+Z: Undo | Ctrl+Shift+Z: Redo | Ctrl+X/C/V: Cut/Copy/Paste | Ctrl+A: Select All
+- **File**: Ctrl+N: New | Ctrl+O: Open | Ctrl+S: Save | Ctrl+Shift+S: Save As | Ctrl+Shift+N: New Window | Ctrl+Q: Quit
+- **Edit**: Ctrl+E: Edit Mode | Ctrl+X/C/V: Cut/Copy/Paste | Ctrl+A: Select All | Ctrl+Shift+C: Copy Total
 
 ## Building
 
@@ -112,13 +115,22 @@ Settings (VAT rate, decimal places, recent files) are automatically saved to `~/
 - **New**: Clear tape and start fresh (Ctrl+N or File > New)
 - **Open**: Load a saved calculation (Ctrl+O or File > Open)
 - **Open Recent**: Quick access to last 10 files (File > Open Recent)
+- **Save**: Quick save to current file (Ctrl+S or File > Save) - enabled when a file is open
 - **Save As**: Export with timestamped filename (Ctrl+Shift+S or File > Save As)
+
+**File Tracking:**
+- Title bar shows current filename: `Tape Calculator - calc-260212-1430.txt`
+- Modified indicator (*) appears when changes are unsaved: `Tape Calculator - calc-260212-1430.txt*`
+- Warning dialog when closing with unsaved changes (Save / Don't Save / Cancel)
 
 ### Editing the Tape
 1. Click **EDIT** (appears after pressing `=`) or use Edit > Edit Mode (Ctrl+E)
 2. Modify operation symbols or values directly in the tape
 3. Click **DONE** to recalculate
 4. Edit menu operations (Cut, Copy, Paste, Select All) available in Edit mode
+
+### Quick Copy Result
+Use **Copy Total** (Ctrl+Shift+C or Edit > Copy Total) to copy the current result to clipboard. The menu item is automatically enabled when there's a calculation result available.
 
 ## Technical Details
 
