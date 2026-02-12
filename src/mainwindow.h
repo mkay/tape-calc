@@ -77,6 +77,11 @@ protected:
   void create_number_button(int number, int row, int col);
   void create_operation_button(const Glib::ustring& label, char op, int row, int col);
 
+  // Settings methods
+  void load_settings();
+  void save_settings();
+  std::string get_config_path();
+
   // Keyboard handler
   bool on_key_pressed(guint keyval, guint keycode, Gdk::ModifierType state);
 

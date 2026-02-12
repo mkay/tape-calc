@@ -10,6 +10,9 @@ A modern GTK4-based tape calculator with a professional adding machine interface
 - **Monospace font** for clear, aligned display
 - **Auto-scrolling** to show latest entries
 - **Permanent history** - all operations are recorded
+- **Editable tape** - modify operations and recalculate results
+- **Text selection and copying** - select and copy any portion of the tape
+- **Save to file** - export tape to a text file
 
 ### Calculation Capabilities
 - **Immediate execution model** - Results calculated as you type (like traditional adding machines)
@@ -29,6 +32,7 @@ A modern GTK4-based tape calculator with a professional adding machine interface
 - **Theme-aware**: Automatically adapts to your GTK theme (light/dark)
 - **Compact design**: Efficient use of screen space
 - **Clean, modern appearance**: Following GTK4 design principles
+- **Settings persistence**: VAT rate and decimal places are automatically saved and restored
 
 ### Keyboard Support
 
@@ -108,10 +112,10 @@ ln -s build/compile_commands.json .
 
 **Example**: `44 + 55 =`
 ```
- +         44,00
- +         55,00
- ---------------
- =         99,00
++         44,00
++         55,00
+---------------
+=         99,00
 ```
 
 ### VAT Calculations
@@ -123,10 +127,10 @@ ln -s build/compile_commands.json .
 
 **Example**: `100 +VAT(19%)`
 ```
- +        100,00
- +         19% | 19,00
- ---------------
- +        119,00
++        100,00
++         19% | 19,00
+---------------
++        119,00
 ```
 
 **Removing VAT**:
@@ -144,6 +148,45 @@ Click the VAT rate button (e.g., `19%`) to cycle through:
 ### Adjusting Decimal Places
 Use the "Dec:" spinner control to change decimal precision (0-6 places).
 All displayed values will update immediately.
+
+### Settings Persistence
+Your preferences are automatically saved and restored between sessions:
+- **VAT rate**: Your selected VAT percentage (e.g., 19%, 20%) is remembered
+- **Decimal places**: Your preferred precision setting (0-6) is preserved
+
+Settings are stored in `~/.config/tape-calc/settings.conf` and updated automatically whenever you change them. No manual saving required!
+
+### Editing the Tape
+After completing a calculation, you can edit the tape to correct operations:
+
+1. Click the **EDIT** button (appears after pressing `=`)
+2. Modify any operation symbol or value directly in the tape
+3. Click **DONE** to recalculate the result
+
+**Example**: Change a calculation from addition to subtraction:
+```
++         12,00
++         10,00    ← Edit this + to -
+---------------
+=         22,00
+```
+
+After editing to `-` and clicking DONE:
+```
++         12,00
+-         10,00
+---------------
+=          2,00
+```
+
+**Notes**:
+- Only modify operation symbols (`+`, `-`, `*`, `/`) and values
+- The calculation recalculates automatically when you click DONE
+- Pressing AC while in edit mode exits edit mode and clears
+
+### Copying and Saving the Tape
+- **Copy**: Select any text in the tape and use Ctrl+C (or Cmd+C on Mac)
+- **Save to file**: Click the save button (💾) to export the entire tape to a text file
 
 ## Technical Details
 
@@ -186,11 +229,10 @@ This calculator follows the **tape calculator** (adding machine) paradigm:
 ## Features Roadmap
 
 Potential future enhancements:
-- [ ] Print tape to file
-- [ ] Copy tape to clipboard
 - [ ] Custom VAT rates
 - [ ] Memory functions (M+, M-, MR, MC)
 - [ ] Save/load calculation sessions
+- [ ] Print tape directly to printer
 
 ## Contributing
 
@@ -201,8 +243,17 @@ Contributions are welcome! The codebase is organized with clear separation betwe
 Based on [GTK4-Calculator](https://github.com/hans-chrstn/GTK4-Calculator) by hans-chrstn, enhanced with tape calculator functionality, VAT calculations, and professional accounting features.
 
 Built with:
+
 - [GTK 4](https://www.gtk.org/) - Modern UI toolkit
 - [gtkmm](https://www.gtkmm.org/) - C++ bindings for GTK
 - [Meson](https://mesonbuild.com/) - Build system
 
 Application icon available in `/assets` directory.
+
+## Disclaimer
+
+This project was created with the assistance of an AI agent. I do not have great expertise in C++, so the code has not really been reviewed. Anyone using or extending this project should independently verify its correctness, safety, and suitability for their use case. 
+
+## Screenshot
+
+![Screenshot of the plugin at work](assets/screenshot.png)

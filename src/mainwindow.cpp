@@ -5,6 +5,8 @@
 #include <fstream>
 #include <algorithm>
 #include <locale>
+#include <filesystem>
+#include <cstdlib>
 #include <gdk/gdkkeysyms.h>
 
 MainWindow::MainWindow()
@@ -39,9 +41,9 @@ MainWindow::MainWindow()
     // Configure tape view
     m_tape_buffer = Gtk::TextBuffer::create();
     m_tape_view.set_buffer(m_tape_buffer);
-    m_tape_view.set_editable(false);  // Not editable by default
-    m_tape_view.set_cursor_visible(false);
-    m_tape_view.set_can_focus(false);  // Not focusable
+    m_tape_view.set_editable(false);  // Read-only (not editable by default)
+    m_tape_view.set_cursor_visible(true);  // Show cursor for text selection
+    m_tape_view.set_can_focus(true);  // Allow focus for text selection
     m_tape_view.set_wrap_mode(Gtk::WrapMode::WORD);
     m_tape_view.set_monospace(true);
     m_tape_view.set_right_margin(20);
@@ -257,6 +259,9 @@ MainWindow::MainWindow()
     key_controller->signal_key_pressed().connect(
         sigc::mem_fun(*this, &MainWindow::on_key_pressed), false);
     add_controller(key_controller);
+
+    // Load saved settings (VAT rate, decimal places, etc.)
+    load_settings();
 
     // Initial display update
     update_displays();
@@ -483,6 +488,15 @@ void MainWindow::on_equals_clicked() {
 }
 
 void MainWindow::on_clear_clicked() {
+    // Exit edit mode first if active
+    if (m_tape_edit_mode) {
+        m_tape_edit_mode = false;
+        m_tape_view.set_editable(false);
+        m_edit_tape_button.set_label("EDIT");
+        m_edit_tape_button.remove_css_class("active");
+        m_tape_view.remove_css_class("edit-mode");
+    }
+
     m_engine.clear();
     update_displays();
     m_edit_tape_button.set_visible(false);  // Hide EDIT button when cleared
@@ -524,12 +538,14 @@ void MainWindow::on_vat_rate_changed() {
     double vat_percentage = m_vat_rate_spin.get_value();
     double vat_rate = vat_percentage / 100.0;
     m_engine.setVATRate(vat_rate);
+    save_settings();
 }
 
 void MainWindow::on_decimal_places_changed() {
     int places = m_decimal_places_spin.get_value_as_int();
     m_engine.setDecimalPlaces(places);
     update_displays();
+    save_settings();
 }
 
 void MainWindow::on_save_tape_clicked() {
@@ -611,12 +627,12 @@ void MainWindow::update_tape() {
         line_starts.push_back(tape_text.length());
 
         if (entry.is_separator) {
-            tape_text += " ---------------\n";
+            tape_text += "---------------\n";
         } else if (entry.is_vat_operation) {
-            // Format VAT entry: " +    19,00% | 20,88"
+            // Format VAT entry: "+    19,00% | 20,88"
             char op = entry.operation == 'V' ? '+' : '-';
             std::ostringstream line;
-            line << " " << op << std::right << std::setw(12)
+            line << op << std::right << std::setw(13)
                  << std::fixed << std::setprecision(0) << (entry.vat_rate * 100)
                  << "% | " << std::fixed << std::setprecision(m_engine.getDecimalPlaces())
                  << entry.vat_amount << "\n";
@@ -630,7 +646,7 @@ void MainWindow::update_tape() {
             std::ostringstream num_str;
             num_str << std::fixed << std::setprecision(m_engine.getDecimalPlaces()) << entry.value;
 
-            line << " " << display_op << std::right << std::setw(13) << num_str.str() << "\n";
+            line << display_op << std::right << std::setw(14) << num_str.str() << "\n";
 
             // Track lines with minus operations for red coloring
             if (entry.operation != '=') {
@@ -658,7 +674,7 @@ void MainWindow::update_tape() {
     int pending_op_start = -1;
     if (!pending_op.empty() && m_engine.isNewNumberStarted() && !m_engine.hasError()) {
         pending_op_start = tape_text.length();
-        tape_text += " " + pending_op + "\n";
+        tape_text += pending_op + "\n";
     }
 
     // Add current input if user is actively typing
@@ -672,9 +688,9 @@ void MainWindow::update_tape() {
             std::string op = m_engine.getRunningTotal();
             if (op.empty()) op = " ";
 
-            // Format: " op     value"
+            // Format: "op     value"
             std::ostringstream line;
-            line << " " << op << std::right << std::setw(13) << current_input;
+            line << op << std::right << std::setw(14) << current_input;
             tape_text += line.str();
         }
     }
@@ -710,7 +726,7 @@ void MainWindow::update_tape() {
     // Apply red/orange color to pending operation line (only if it's a minus)
     if (pending_op_start >= 0 && pending_op == "-") {
         auto start_iter = m_tape_buffer->get_iter_at_offset(pending_op_start);
-        auto end_iter = m_tape_buffer->get_iter_at_offset(pending_op_start + pending_op.length() + 2);  // " -\n"
+        auto end_iter = m_tape_buffer->get_iter_at_offset(pending_op_start + pending_op.length() + 1);  // "-\n"
         m_tape_buffer->apply_tag_by_name("red-text", start_iter, end_iter);
     }
 
@@ -738,8 +754,7 @@ void MainWindow::on_edit_tape_clicked() {
         // Exit edit mode and recalculate
         m_tape_edit_mode = false;
         m_tape_view.set_editable(false);
-        m_tape_view.set_cursor_visible(false);
-        m_tape_view.set_can_focus(false);
+        // Keep cursor visible and focusable for text selection
         m_edit_tape_button.set_label("EDIT");
 
         // Remove visual feedback
@@ -764,16 +779,16 @@ void MainWindow::on_edit_tape_clicked() {
                 continue;
             }
 
-            if (line.size() >= 2 && line[1] == '=') {
+            if (line.size() >= 2 && line[0] == '=') {
                 break;  // Stop at result line
             }
 
             // Parse operation and value
-            if (line.size() >= 2 && (line[1] == '+' || line[1] == '-' || line[1] == '*' || line[1] == '/')) {
-                char op = line[1];
+            if (line.size() >= 2 && (line[0] == '+' || line[0] == '-' || line[0] == '*' || line[0] == '/')) {
+                char op = line[0];
 
                 // Extract numeric value
-                std::string value_str = line.substr(2);
+                std::string value_str = line.substr(1);
 
                 // Skip VAT lines
                 if (value_str.find('|') != std::string::npos) {
@@ -815,6 +830,14 @@ void MainWindow::on_edit_tape_clicked() {
             std::ostringstream oss;
             oss.imbue(std::locale("C"));  // Use C locale to ensure '.' as decimal separator
 
+            // Handle first value
+            // If first operation is '-', we need to subtract from 0
+            if (operations[0] == '-') {
+                // Input 0, then subtract the first value
+                m_engine.inputDigit(0);
+                m_engine.performOperation('-');
+            }
+
             // Input first value with proper formatting
             oss << std::fixed << std::setprecision(m_engine.getDecimalPlaces()) << values[0];
             std::string val_str = oss.str();
@@ -829,7 +852,7 @@ void MainWindow::on_edit_tape_clicked() {
             // Apply operations with subsequent values
             // Loop through all values except the last one
             for (size_t i = 0; i < values.size() - 1; i++) {
-                m_engine.performOperation(operations[i]);
+                m_engine.performOperation(operations[i + 1]);
 
                 // Input next value
                 oss.str("");
@@ -973,4 +996,91 @@ bool MainWindow::on_key_pressed(guint keyval, guint keycode, Gdk::ModifierType s
     }
 
     return false;
+}
+
+std::string MainWindow::get_config_path() {
+    const char* home = std::getenv("HOME");
+    if (!home) {
+        home = std::getenv("USERPROFILE"); // Windows fallback
+    }
+    if (!home) {
+        return "";
+    }
+
+    std::string config_dir = std::string(home) + "/.config/tape-calc";
+    std::filesystem::create_directories(config_dir);
+    return config_dir + "/settings.conf";
+}
+
+void MainWindow::load_settings() {
+    std::string config_path = get_config_path();
+    if (config_path.empty()) {
+        return;
+    }
+
+    std::ifstream config_file(config_path);
+    if (!config_file.is_open()) {
+        return; // No config file yet, use defaults
+    }
+
+    std::string line;
+    while (std::getline(config_file, line)) {
+        // Skip empty lines and comments
+        if (line.empty() || line[0] == '#') {
+            continue;
+        }
+
+        // Parse key=value
+        size_t eq_pos = line.find('=');
+        if (eq_pos == std::string::npos) {
+            continue;
+        }
+
+        std::string key = line.substr(0, eq_pos);
+        std::string value = line.substr(eq_pos + 1);
+
+        // Trim whitespace
+        key.erase(0, key.find_first_not_of(" \t"));
+        key.erase(key.find_last_not_of(" \t") + 1);
+        value.erase(0, value.find_first_not_of(" \t"));
+        value.erase(value.find_last_not_of(" \t") + 1);
+
+        // Apply settings
+        if (key == "vat_rate") {
+            try {
+                double vat_rate = std::stod(value);
+                m_vat_rate_spin.set_value(vat_rate);
+                m_engine.setVATRate(vat_rate / 100.0);
+            } catch (...) {
+                // Invalid value, skip
+            }
+        } else if (key == "decimal_places") {
+            try {
+                int places = std::stoi(value);
+                if (places >= 0 && places <= 6) {
+                    m_decimal_places_spin.set_value(places);
+                    m_engine.setDecimalPlaces(places);
+                }
+            } catch (...) {
+                // Invalid value, skip
+            }
+        }
+    }
+}
+
+void MainWindow::save_settings() {
+    std::string config_path = get_config_path();
+    if (config_path.empty()) {
+        return;
+    }
+
+    std::ofstream config_file(config_path);
+    if (!config_file.is_open()) {
+        return;
+    }
+
+    config_file << "# Tape Calculator Settings\n";
+    config_file << "# This file is auto-generated\n\n";
+    config_file << "vat_rate=" << m_vat_rate_spin.get_value() << "\n";
+    config_file << "decimal_places=" << m_decimal_places_spin.get_value() << "\n";
 }
