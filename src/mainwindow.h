@@ -102,6 +102,8 @@ protected:
   void on_action_open_recent(const std::string& file_path);
   void on_action_save();
   void on_action_save_as();
+  void on_action_save_to_history();
+  void on_action_print();
   void on_action_browse_history();
   void on_action_new_window();
   void on_action_quit();
@@ -111,6 +113,7 @@ protected:
   void on_action_select_all();
   void on_action_copy_total();
   void on_action_documentation();
+  void on_action_settings();
 
   // Settings methods
   void load_settings();
@@ -143,6 +146,7 @@ private:
   // File state tracking
   bool m_is_modified;
   std::string m_current_file_path;
+  std::string m_custom_history_path;
 };
 
 #endif

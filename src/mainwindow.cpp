@@ -22,8 +22,8 @@ MainWindow::MainWindow(const Glib::RefPtr<Gtk::Application>& app)
     , m_control_box(Gtk::Orientation::HORIZONTAL)
     , m_vat_box(Gtk::Orientation::HORIZONTAL)
     , m_vat_rate_btn("19%")
-    , m_add_vat_btn("+VAT")
-    , m_subtract_vat_btn("-VAT")
+    , m_add_vat_btn("+TAX")
+    , m_subtract_vat_btn("-TAX")
     , APPNAME("Tape Calculator")
     , WIDTH(700)
     , HEIGHT(420)
@@ -76,6 +76,7 @@ MainWindow::MainWindow(const Glib::RefPtr<Gtk::Application>& app)
     m_history_title_box.append(m_history_title);
     m_history_title_box.append(m_edit_tape_button);
     m_history_title_box.set_spacing(10);
+    m_history_title_box.add_css_class("history-title-box");
 
     // Configure scrolled window for tape
     m_tape_scroll.set_child(m_tape_view);
@@ -102,7 +103,7 @@ MainWindow::MainWindow(const Glib::RefPtr<Gtk::Application>& app)
     m_result_label.add_css_class("result-display");
     m_result_label.set_visible(false); // Initially hidden
 
-    // Configure control box (decimal places and VAT rate)
+    // Configure control box (decimal places and tax rate)
     m_decimal_label.set_text("Dec:");
     m_decimal_label.set_margin_end(5);
     m_decimal_places_spin.set_range(0, 6);
@@ -112,7 +113,7 @@ MainWindow::MainWindow(const Glib::RefPtr<Gtk::Application>& app)
     m_decimal_places_spin.signal_value_changed().connect(
         sigc::mem_fun(*this, &MainWindow::on_decimal_places_changed));
 
-    m_vat_label.set_text("VAT:");
+    m_vat_label.set_text("TAX:");
     m_vat_label.set_margin_start(15);
     m_vat_label.set_margin_end(5);
     m_vat_rate_spin.set_range(0, 100);
@@ -123,7 +124,7 @@ MainWindow::MainWindow(const Glib::RefPtr<Gtk::Application>& app)
     m_vat_rate_spin.signal_value_changed().connect(
         sigc::mem_fun(*this, &MainWindow::on_vat_rate_changed));
 
-    // VAT control on the left
+    // Tax control on the left
     m_control_box.append(m_vat_label);
     m_control_box.append(m_vat_rate_spin);
 
@@ -147,7 +148,10 @@ MainWindow::MainWindow(const Glib::RefPtr<Gtk::Application>& app)
     // Configure button grid (5 rows x 4 columns)
     m_button_grid.set_row_spacing(8);
     m_button_grid.set_column_spacing(8);
-    m_button_grid.set_margin(10);
+    m_button_grid.set_margin_start(10);
+    m_button_grid.set_margin_end(10);
+    m_button_grid.set_margin_top(0);
+    m_button_grid.set_margin_bottom(10);
     m_button_grid.set_column_homogeneous(true);
     m_button_grid.set_row_homogeneous(false);
     m_button_grid.set_hexpand(true);
@@ -225,11 +229,13 @@ MainWindow::MainWindow(const Glib::RefPtr<Gtk::Application>& app)
     save_btn->set_tooltip_text("Save tape to file");
     m_button_grid.attach(*save_btn, 0, 5, 1, 1);
 
+    m_add_vat_btn.set_label("+TAX");
     m_add_vat_btn.signal_clicked().connect(sigc::mem_fun(*this, &MainWindow::on_add_vat_clicked));
     m_add_vat_btn.add_css_class("vat-button");
     m_add_vat_btn.set_focus_on_click(false);
     m_button_grid.attach(m_add_vat_btn, 1, 5, 1, 1);
 
+    m_subtract_vat_btn.set_label("-TAX");
     m_subtract_vat_btn.signal_clicked().connect(sigc::mem_fun(*this, &MainWindow::on_subtract_vat_clicked));
     m_subtract_vat_btn.add_css_class("vat-button");
     m_subtract_vat_btn.set_focus_on_click(false);
@@ -246,9 +252,11 @@ MainWindow::MainWindow(const Glib::RefPtr<Gtk::Application>& app)
     m_left_panel.add_css_class("history-panel");
 
     // Assemble right panel (controls)
-    m_right_panel.append(m_control_box);
     m_right_panel.append(m_button_grid);
-    m_right_panel.set_margin(10);
+    m_right_panel.set_margin_start(10);
+    m_right_panel.set_margin_end(10);
+    m_right_panel.set_margin_top(0);
+    m_right_panel.set_margin_bottom(10);
     m_right_panel.set_hexpand(false);
     m_right_panel.set_vexpand(false);
 
@@ -310,6 +318,16 @@ void MainWindow::setup_menu() {
     action_save_as->signal_activate().connect(sigc::hide(sigc::mem_fun(*this, &MainWindow::on_action_save_as)));
     m_app->add_action(action_save_as);
 
+    auto action_save_to_history = Gio::SimpleAction::create("save-to-history");
+    action_save_to_history->signal_activate().connect(sigc::hide(sigc::mem_fun(*this, &MainWindow::on_action_save_to_history)));
+    action_save_to_history->set_enabled(false);  // Initially disabled (no calculation yet)
+    m_app->add_action(action_save_to_history);
+
+    auto action_print = Gio::SimpleAction::create("print");
+    action_print->signal_activate().connect(sigc::hide(sigc::mem_fun(*this, &MainWindow::on_action_print)));
+    action_print->set_enabled(false);  // Initially disabled (no calculation yet)
+    m_app->add_action(action_print);
+
     auto action_browse_history = Gio::SimpleAction::create("browse-history");
     action_browse_history->signal_activate().connect(sigc::hide(sigc::mem_fun(*this, &MainWindow::on_action_browse_history)));
     m_app->add_action(action_browse_history);
@@ -352,6 +370,10 @@ void MainWindow::setup_menu() {
     action_documentation->signal_activate().connect(sigc::hide(sigc::mem_fun(*this, &MainWindow::on_action_documentation)));
     m_app->add_action(action_documentation);
 
+    auto action_settings = Gio::SimpleAction::create("settings");
+    action_settings->signal_activate().connect(sigc::hide(sigc::mem_fun(*this, &MainWindow::on_action_settings)));
+    m_app->add_action(action_settings);
+
     // Set keyboard accelerators
     m_app->set_accel_for_action("app.edit-mode", "<Primary>e");
     m_app->set_accel_for_action("app.new", "<Primary>n");
@@ -365,6 +387,8 @@ void MainWindow::setup_menu() {
     m_app->set_accel_for_action("app.paste", "<Primary>v");
     m_app->set_accel_for_action("app.select-all", "<Primary>a");
     m_app->set_accel_for_action("app.copy-total", "<Primary><Shift>c");
+    m_app->set_accel_for_action("app.settings", "<Primary>comma");
+    m_app->set_accel_for_action("app.print", "<Primary>p");
 
     // Create menu bar
     auto menu_bar = Gio::Menu::create();
@@ -380,6 +404,8 @@ void MainWindow::setup_menu() {
 
     file_menu->append("_Save", "app.save");
     file_menu->append("Save _As...", "app.save-as");
+    file_menu->append("Save to _History", "app.save-to-history");
+    file_menu->append("_Print / Save to PDF...", "app.print");
     file_menu->append("_Browse History...", "app.browse-history");
     file_menu->append("New _Window", "app.new-window");
     file_menu->append("_Quit", "app.quit");
@@ -397,6 +423,7 @@ void MainWindow::setup_menu() {
     edit_menu->append("_Paste", "app.paste");
     edit_menu->append("Select _All", "app.select-all");
     edit_menu->append("Copy _Total", "app.copy-total");
+    edit_menu->append("_Settings...", "app.settings");
     menu_bar->append_submenu("_Edit", edit_menu);
 
     // Help menu
@@ -470,6 +497,51 @@ void MainWindow::on_action_save() {
 
 void MainWindow::on_action_save_as() {
     on_save_tape_clicked();
+}
+
+void MainWindow::on_action_save_to_history() {
+    save_to_history();
+}
+
+void MainWindow::on_action_print() {
+    auto print_op = Gtk::PrintOperation::create();
+
+    // Set up print settings
+    print_op->set_n_pages(1);
+    print_op->set_unit(Gtk::Unit::POINTS);
+    print_op->set_job_name("Tape Calculator - " + m_engine.getResult());
+
+    // Connect to the draw_page signal to render the content
+    print_op->signal_draw_page().connect([this](const Glib::RefPtr<Gtk::PrintContext>& context, int page_nr) {
+        auto cr = context->get_cairo_context();
+        auto layout = context->create_pango_layout();
+
+        // Set monospace font
+        auto font_desc = Pango::FontDescription("monospace 12");
+        layout->set_font_description(font_desc);
+
+        // Get tape content
+        std::string tape_content = m_tape_buffer->get_text();
+        layout->set_text(tape_content);
+
+        // Render the text
+        cr->move_to(20, 20);
+        layout->show_in_cairo_context(cr);
+    });
+
+    // Run the print operation
+    try {
+        auto result = print_op->run(Gtk::PrintOperation::Action::PRINT_DIALOG, *this);
+        if (result == Gtk::PrintOperation::Result::ERROR) {
+            auto dialog = Gtk::AlertDialog::create("Print Error");
+            dialog->set_detail("An error occurred while trying to print.");
+            dialog->show(*this);
+        }
+    } catch (const Glib::Error& ex) {
+        auto dialog = Gtk::AlertDialog::create("Print Error");
+        dialog->set_detail(ex.what());
+        dialog->show(*this);
+    }
 }
 
 void MainWindow::on_action_browse_history() {
@@ -555,6 +627,172 @@ void MainWindow::on_action_documentation() {
     launcher->launch(*this, [](const Glib::RefPtr<Gio::AsyncResult>&) {
         // Callback - we don't need to do anything when the URL is launched
     });
+}
+
+void MainWindow::on_action_settings() {
+    // Create settings dialog
+    auto dialog = new Gtk::Window();
+    dialog->set_transient_for(*this);
+    dialog->set_modal(true);
+    dialog->set_title("Settings");
+    dialog->set_default_size(500, 280);
+    dialog->set_resizable(false);
+
+    // Create main box for dialog content
+    auto content_box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL);
+    content_box->set_margin(20);
+    content_box->set_spacing(15);
+
+    // Tax Rate setting
+    auto vat_box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL);
+    vat_box->set_spacing(10);
+    auto vat_label = Gtk::make_managed<Gtk::Label>("Tax Rate (%):");
+    vat_label->set_halign(Gtk::Align::START);
+    vat_label->set_hexpand(true);
+    auto vat_spin = Gtk::make_managed<Gtk::SpinButton>();
+    vat_spin->set_range(0, 100);
+    vat_spin->set_increments(0.5, 1);
+    vat_spin->set_value(m_vat_rate_spin.get_value());
+    vat_spin->set_digits(1);
+    vat_spin->set_width_chars(6);
+    vat_box->append(*vat_label);
+    vat_box->append(*vat_spin);
+
+    // Decimal Places setting
+    auto dec_box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL);
+    dec_box->set_spacing(10);
+    auto dec_label = Gtk::make_managed<Gtk::Label>("Decimal Places:");
+    dec_label->set_halign(Gtk::Align::START);
+    dec_label->set_hexpand(true);
+    auto dec_spin = Gtk::make_managed<Gtk::SpinButton>();
+    dec_spin->set_range(0, 6);
+    dec_spin->set_increments(1, 1);
+    dec_spin->set_value(m_decimal_places_spin.get_value_as_int());
+    dec_spin->set_width_chars(3);
+    dec_box->append(*dec_label);
+    dec_box->append(*dec_spin);
+
+    // History folder setting - use vertical layout for better space
+    auto history_vbox = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL);
+    history_vbox->set_spacing(5);
+
+    auto history_label = Gtk::make_managed<Gtk::Label>("History Folder:");
+    history_label->set_halign(Gtk::Align::START);
+
+    // Get the default history path for display
+    std::string default_history_path;
+    const char* home = std::getenv("HOME");
+    if (home) {
+        default_history_path = std::string(home) + "/.config/tape-calc/history";
+    }
+
+    // Store current history path in a shared pointer
+    auto current_history = std::make_shared<std::string>(
+        m_custom_history_path.empty() ? "" : m_custom_history_path
+    );
+
+    // Display current path or default path
+    std::string display_path = m_custom_history_path.empty()
+        ? default_history_path + " (default)"
+        : m_custom_history_path;
+
+    auto history_path_label = Gtk::make_managed<Gtk::Label>(display_path);
+    history_path_label->set_halign(Gtk::Align::START);
+    history_path_label->set_wrap(true);
+    history_path_label->set_wrap_mode(Pango::WrapMode::CHAR);
+    history_path_label->set_xalign(0);
+    history_path_label->set_selectable(true);  // Allow user to select and copy the path
+    history_path_label->set_hexpand(true);
+    history_path_label->add_css_class("caption");  // Smaller text style
+
+    // Buttons in horizontal box
+    auto history_button_box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL);
+    history_button_box->set_spacing(10);
+
+    auto choose_btn = Gtk::make_managed<Gtk::Button>("Choose...");
+    choose_btn->signal_clicked().connect([this, dialog, history_path_label, current_history]() {
+        auto folder_dialog = Gtk::FileDialog::create();
+        folder_dialog->set_title("Select History Folder");
+
+        // Set initial folder
+        if (!m_custom_history_path.empty()) {
+            folder_dialog->set_initial_folder(Gio::File::create_for_path(m_custom_history_path));
+        }
+
+        folder_dialog->select_folder(*dialog, [history_path_label, current_history](const Glib::RefPtr<Gio::AsyncResult>& result) {
+            try {
+                auto folder = std::dynamic_pointer_cast<Gtk::FileDialog>(result->get_source_object_base())->select_folder_finish(result);
+                if (folder) {
+                    *current_history = folder->get_path();
+                    history_path_label->set_text(*current_history);
+                }
+            } catch (const Glib::Error& e) {
+                // User cancelled
+            }
+        });
+    });
+
+    auto reset_btn = Gtk::make_managed<Gtk::Button>("Reset");
+    reset_btn->signal_clicked().connect([history_path_label, current_history, default_history_path]() {
+        *current_history = "";
+        history_path_label->set_text(default_history_path + " (default)");
+    });
+
+    history_button_box->append(*choose_btn);
+    history_button_box->append(*reset_btn);
+
+    history_vbox->append(*history_label);
+    history_vbox->append(*history_path_label);
+    history_vbox->append(*history_button_box);
+
+    // Add settings to content box
+    content_box->append(*vat_box);
+    content_box->append(*dec_box);
+    content_box->append(*history_vbox);
+
+    // Add separator
+    auto separator = Gtk::make_managed<Gtk::Separator>(Gtk::Orientation::HORIZONTAL);
+    separator->set_margin_top(10);
+    separator->set_margin_bottom(10);
+    content_box->append(*separator);
+
+    // Button box
+    auto button_box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL);
+    button_box->set_halign(Gtk::Align::END);
+    button_box->set_spacing(10);
+
+    // Cancel button
+    auto cancel_btn = Gtk::make_managed<Gtk::Button>("Cancel");
+    cancel_btn->signal_clicked().connect([dialog]() {
+        dialog->close();
+    });
+
+    // OK button
+    auto ok_btn = Gtk::make_managed<Gtk::Button>("OK");
+    ok_btn->add_css_class("suggested-action");
+    ok_btn->signal_clicked().connect([this, vat_spin, dec_spin, current_history, dialog]() {
+        // Apply settings
+        m_vat_rate_spin.set_value(vat_spin->get_value());
+        m_decimal_places_spin.set_value(dec_spin->get_value_as_int());
+        m_custom_history_path = *current_history;
+        on_vat_rate_changed();
+        on_decimal_places_changed();
+        save_settings();
+        dialog->close();
+    });
+
+    button_box->append(*cancel_btn);
+    button_box->append(*ok_btn);
+    content_box->append(*button_box);
+
+    dialog->set_child(*content_box);
+
+    // Auto-destroy the dialog when it's closed
+    dialog->signal_hide().connect([dialog]() {
+        delete dialog;
+    });
+
+    dialog->present();
 }
 
 // Recent files management
@@ -865,6 +1103,13 @@ void MainWindow::load_file(const std::string& file_path) {
     // Show EDIT button
     m_edit_tape_button.set_visible(true);
 
+    // Enable "Save to History" and "Print" actions after loading file
+    auto action_save_to_history = std::dynamic_pointer_cast<Gio::SimpleAction>(m_app->lookup_action("save-to-history"));
+    if (action_save_to_history) action_save_to_history->set_enabled(true);
+
+    auto action_print = std::dynamic_pointer_cast<Gio::SimpleAction>(m_app->lookup_action("print"));
+    if (action_print) action_print->set_enabled(true);
+
     // Add to recent files
     add_recent_file(file_path);
 
@@ -878,6 +1123,11 @@ void MainWindow::setup_css() {
     m_css_provider->load_from_string(R"(
         .history-panel {
             border-right: 1px solid alpha(@borders, 0.3);
+        }
+
+        .history-title-box {
+            background-color: @theme_base_color;
+            padding: 0px;
         }
 
         .history-title {
@@ -1091,6 +1341,14 @@ void MainWindow::on_equals_clicked() {
     m_engine.calculateEquals();
     update_displays();
     m_edit_tape_button.set_visible(true);  // Show EDIT button after calculation
+
+    // Enable "Save to History" and "Print" actions after calculation
+    auto action_save_to_history = std::dynamic_pointer_cast<Gio::SimpleAction>(m_app->lookup_action("save-to-history"));
+    if (action_save_to_history) action_save_to_history->set_enabled(true);
+
+    auto action_print = std::dynamic_pointer_cast<Gio::SimpleAction>(m_app->lookup_action("print"));
+    if (action_print) action_print->set_enabled(true);
+
     set_modified(true);
 }
 
@@ -1138,6 +1396,14 @@ void MainWindow::perform_clear() {
     m_engine.clear();
     update_displays();
     m_edit_tape_button.set_visible(false);  // Hide EDIT button when cleared
+
+    // Disable "Save to History" and "Print" actions when cleared
+    auto action_save_to_history = std::dynamic_pointer_cast<Gio::SimpleAction>(m_app->lookup_action("save-to-history"));
+    if (action_save_to_history) action_save_to_history->set_enabled(false);
+
+    auto action_print = std::dynamic_pointer_cast<Gio::SimpleAction>(m_app->lookup_action("print"));
+    if (action_print) action_print->set_enabled(false);
+
     m_current_file_path = "";  // Clear current file
     set_modified(false);
 }
@@ -1731,6 +1997,11 @@ void MainWindow::load_settings() {
             } catch (...) {
                 // Invalid value, skip
             }
+        } else if (key == "custom_history_path") {
+            // Verify the path exists before using it
+            if (!value.empty() && std::filesystem::exists(value)) {
+                m_custom_history_path = value;
+            }
         }
     }
 }
@@ -1739,6 +2010,20 @@ void MainWindow::save_settings() {
     std::string config_path = get_config_path();
     if (config_path.empty()) {
         return;
+    }
+
+    // Read existing settings (like recent files)
+    std::map<std::string, std::string> settings;
+    std::vector<std::string> recent_files;
+    std::ifstream config_file_in(config_path);
+    if (config_file_in.is_open()) {
+        std::string line;
+        while (std::getline(config_file_in, line)) {
+            if (line.substr(0, 12) == "recent_file=") {
+                recent_files.push_back(line.substr(12));
+            }
+        }
+        config_file_in.close();
     }
 
     std::ofstream config_file(config_path);
@@ -1750,6 +2035,14 @@ void MainWindow::save_settings() {
     config_file << "# This file is auto-generated\n\n";
     config_file << "vat_rate=" << m_vat_rate_spin.get_value() << "\n";
     config_file << "decimal_places=" << m_decimal_places_spin.get_value() << "\n";
+    if (!m_custom_history_path.empty()) {
+        config_file << "custom_history_path=" << m_custom_history_path << "\n";
+    }
+
+    // Write recent files back
+    for (const auto& file : recent_files) {
+        config_file << "recent_file=" << file << "\n";
+    }
 }
 
 // File state management methods
@@ -1856,6 +2149,14 @@ bool MainWindow::save_to_file(const std::string& file_path) {
 }
 
 std::string MainWindow::get_history_path() {
+    // If custom history path is set, use it
+    if (!m_custom_history_path.empty()) {
+        // Create custom history directory if it doesn't exist
+        std::filesystem::create_directories(m_custom_history_path);
+        return m_custom_history_path;
+    }
+
+    // Otherwise use default
     const char* home = std::getenv("HOME");
     if (!home) {
         home = std::getenv("USERPROFILE"); // Windows fallback
