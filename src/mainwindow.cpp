@@ -310,6 +310,10 @@ void MainWindow::setup_menu() {
     action_save_as->signal_activate().connect(sigc::hide(sigc::mem_fun(*this, &MainWindow::on_action_save_as)));
     m_app->add_action(action_save_as);
 
+    auto action_browse_history = Gio::SimpleAction::create("browse-history");
+    action_browse_history->signal_activate().connect(sigc::hide(sigc::mem_fun(*this, &MainWindow::on_action_browse_history)));
+    m_app->add_action(action_browse_history);
+
     auto action_new_window = Gio::SimpleAction::create("new-window");
     action_new_window->signal_activate().connect(sigc::hide(sigc::mem_fun(*this, &MainWindow::on_action_new_window)));
     m_app->add_action(action_new_window);
@@ -376,6 +380,7 @@ void MainWindow::setup_menu() {
 
     file_menu->append("_Save", "app.save");
     file_menu->append("Save _As...", "app.save-as");
+    file_menu->append("_Browse History...", "app.browse-history");
     file_menu->append("New _Window", "app.new-window");
     file_menu->append("_Quit", "app.quit");
     menu_bar->append_submenu("_File", file_menu);
@@ -440,8 +445,9 @@ void MainWindow::on_action_open() {
 
     // Set up file filters
     auto filter = Gtk::FileFilter::create();
-    filter->set_name("Text files");
-    filter->add_pattern("*.txt");
+    filter->set_name("Tape Calculator files");
+    filter->add_pattern("*.calc.txt");
+    filter->add_pattern("*.txt");  // Backward compatibility
     auto filters = Gio::ListStore<Gtk::FileFilter>::create();
     filters->append(filter);
     dialog->set_filters(filters);
@@ -449,158 +455,7 @@ void MainWindow::on_action_open() {
     dialog->open(*this, [this](const Glib::RefPtr<Gio::AsyncResult>& result) {
         try {
             auto file = std::dynamic_pointer_cast<Gtk::FileDialog>(result->get_source_object_base())->open_finish(result);
-            auto path = file->get_path();
-
-            // Read file and parse tape entries
-            std::ifstream infile(path);
-            if (infile.is_open()) {
-                // Clear current tape
-                m_engine.clear();
-
-                // First pass: collect all lines and parse them
-                struct ParsedLine {
-                    char operation;
-                    double value;
-                    bool is_vat;
-                    double vat_rate;
-                    double vat_amount;
-                    bool is_separator;
-                };
-                std::vector<ParsedLine> parsed_lines;
-
-                std::string line;
-                while (std::getline(infile, line)) {
-                    // Skip empty lines
-                    if (line.empty()) continue;
-
-                    // Check if it's a separator line
-                    if (line.find("---") != std::string::npos) {
-                        parsed_lines.push_back({' ', 0.0, false, 0.0, 0.0, true});
-                        continue;
-                    }
-
-                    // Parse operation and value
-                    // Format: "operation   value" (operation left-aligned, value right-aligned)
-                    if (line.length() < 3) continue;
-
-                    char operation = line[0];
-
-                    // Skip if not a valid operation
-                    if (operation != '+' && operation != '-' && operation != '*' &&
-                        operation != '/' && operation != '=' && operation != '%') {
-                        continue;
-                    }
-
-                    // Extract the value (right side of the line)
-                    std::string value_str;
-                    size_t last_space = line.find_last_of(' ');
-                    if (last_space != std::string::npos) {
-                        value_str = line.substr(last_space + 1);
-                    } else {
-                        value_str = line.substr(1);
-                    }
-
-                    // Handle VAT lines (contains % and |)
-                    if (line.find('%') != std::string::npos && line.find('|') != std::string::npos) {
-                        // Format: "+         19% | 19,00"
-                        // Extract VAT rate and amount
-                        size_t pipe_pos = line.find('|');
-                        size_t percent_pos = line.find('%');
-
-                        std::string vat_rate_str = line.substr(1, percent_pos - 1);
-                        std::string vat_amount_str = line.substr(pipe_pos + 1);
-
-                        // Trim whitespace
-                        vat_rate_str.erase(0, vat_rate_str.find_first_not_of(" \t"));
-                        vat_rate_str.erase(vat_rate_str.find_last_not_of(" \t") + 1);
-                        vat_amount_str.erase(0, vat_amount_str.find_first_not_of(" \t"));
-                        vat_amount_str.erase(vat_amount_str.find_last_not_of(" \t") + 1);
-
-                        // Parse values (replace comma with period for parsing)
-                        std::replace(vat_rate_str.begin(), vat_rate_str.end(), ',', '.');
-                        std::replace(vat_amount_str.begin(), vat_amount_str.end(), ',', '.');
-
-                        try {
-                            double vat_rate = std::stod(vat_rate_str) / 100.0;
-                            double vat_amount = std::stod(vat_amount_str);
-                            parsed_lines.push_back({operation, vat_amount, true, vat_rate, vat_amount, false});
-                        } catch (...) {
-                            // Skip invalid VAT line
-                        }
-                        continue;
-                    }
-
-                    // Trim whitespace from value string
-                    value_str.erase(0, value_str.find_first_not_of(" \t\r\n"));
-                    value_str.erase(value_str.find_last_not_of(" \t\r\n") + 1);
-
-                    // Parse the number (handle European format: period as thousands separator, comma as decimal)
-                    // First remove all periods (thousands separators)
-                    value_str.erase(std::remove(value_str.begin(), value_str.end(), '.'), value_str.end());
-                    // Then replace comma with period (decimal separator for C locale)
-                    std::replace(value_str.begin(), value_str.end(), ',', '.');
-
-                    // Parse using C locale to ensure '.' is recognized as decimal separator
-                    std::istringstream iss(value_str);
-                    iss.imbue(std::locale("C"));
-                    double value = 0.0;
-                    if (iss >> value) {
-                        parsed_lines.push_back({operation, value, false, 0.0, 0.0, false});
-                    }
-                }
-
-                infile.close();
-
-                // Second pass: create tape entries with corrected operations
-                // The displayed operation is the one applied TO that value
-                // But TapeEntry stores the NEXT operation, so we need to shift
-                for (size_t i = 0; i < parsed_lines.size(); i++) {
-                    const auto& curr = parsed_lines[i];
-
-                    if (curr.is_separator) {
-                        m_engine.loadTapeEntry(TapeEntry::separator());
-                        continue;
-                    }
-
-                    // Determine the operation to store (the NEXT operation)
-                    char next_operation = '\0';
-                    if (i + 1 < parsed_lines.size() && !parsed_lines[i + 1].is_separator) {
-                        next_operation = parsed_lines[i + 1].operation;
-                    } else {
-                        // Last entry before separator or end - use current operation
-                        next_operation = curr.operation;
-                    }
-
-                    if (curr.is_vat) {
-                        char vat_op = (curr.operation == '+') ? 'V' : 'v';
-                        TapeEntry entry(curr.value, vat_op, "", true, curr.vat_rate, curr.vat_amount);
-                        m_engine.loadTapeEntry(entry);
-                    } else if (curr.operation != '=') {
-                        TapeEntry entry(curr.value, next_operation, "", false);
-                        m_engine.loadTapeEntry(entry);
-                    } else {
-                        // Result line
-                        TapeEntry entry(curr.value, '=', "", false);
-                        m_engine.loadTapeEntry(entry);
-                    }
-                }
-
-                // Recalculate from loaded tape
-                m_engine.recalculateFromTape();
-
-                // Update displays
-                update_displays();
-
-                // Show EDIT button so Edit mode is available
-                m_edit_tape_button.set_visible(true);
-
-                // Add to recent files
-                add_recent_file(path);
-
-                // Update file state
-                m_current_file_path = path;
-                set_modified(false);
-            }
+            load_file(file->get_path());
         } catch (const Glib::Error& e) {
             // User cancelled or error occurred
         }
@@ -615,6 +470,39 @@ void MainWindow::on_action_save() {
 
 void MainWindow::on_action_save_as() {
     on_save_tape_clicked();
+}
+
+void MainWindow::on_action_browse_history() {
+    std::string history_dir = get_history_path();
+    if (history_dir.empty()) {
+        return;
+    }
+
+    // Open the history folder with file dialog
+    auto dialog = Gtk::FileDialog::create();
+    dialog->set_title("Browse History");
+    dialog->set_initial_folder(Gio::File::create_for_path(history_dir));
+
+    // Set up file filters
+    auto filter = Gtk::FileFilter::create();
+    filter->set_name("Tape Calculator files");
+    filter->add_pattern("*.calc.txt");
+    filter->add_pattern("*.txt");  // Backward compatibility
+    auto filters = Gio::ListStore<Gtk::FileFilter>::create();
+    filters->append(filter);
+    dialog->set_filters(filters);
+
+    dialog->open(*this, [this](const Glib::RefPtr<Gio::AsyncResult>& result) {
+        try {
+            auto file = std::dynamic_pointer_cast<Gtk::FileDialog>(result->get_source_object_base())->open_finish(result);
+            if (file) {
+                // User selected a file from history, open it via on_action_open_recent
+                on_action_open_recent(file->get_path());
+            }
+        } catch (const Glib::Error& e) {
+            // User cancelled or error occurred
+        }
+    });
 }
 
 void MainWindow::on_action_new_window() {
@@ -819,153 +707,170 @@ void MainWindow::on_action_open_recent(const std::string& file_path) {
         return;
     }
 
-    // Read file and parse tape entries (same as on_action_open)
-    std::ifstream infile(file_path);
-    if (infile.is_open()) {
-        // Clear current tape
-        m_engine.clear();
+    // Load the file using the common load_file method
+    load_file(file_path);
+}
 
-        // First pass: collect all lines and parse them
-        struct ParsedLine {
-            char operation;
-            double value;
-            bool is_vat;
-            double vat_rate;
-            double vat_amount;
-            bool is_separator;
-        };
-        std::vector<ParsedLine> parsed_lines;
-
-        std::string line;
-        while (std::getline(infile, line)) {
-            // Skip empty lines
-            if (line.empty()) continue;
-
-            // Check if it's a separator line
-            if (line.find("---") != std::string::npos) {
-                parsed_lines.push_back({' ', 0.0, false, 0.0, 0.0, true});
-                continue;
-            }
-
-            // Parse operation and value
-            if (line.length() < 3) continue;
-
-            char operation = line[0];
-
-            // Skip if not a valid operation
-            if (operation != '+' && operation != '-' && operation != '*' &&
-                operation != '/' && operation != '=' && operation != '%') {
-                continue;
-            }
-
-            // Extract the value (right side of the line)
-            std::string value_str;
-            size_t last_space = line.find_last_of(' ');
-            if (last_space != std::string::npos) {
-                value_str = line.substr(last_space + 1);
-            } else {
-                value_str = line.substr(1);
-            }
-
-            // Handle VAT lines (contains % and |)
-            if (line.find('%') != std::string::npos && line.find('|') != std::string::npos) {
-                size_t pipe_pos = line.find('|');
-                size_t percent_pos = line.find('%');
-
-                std::string vat_rate_str = line.substr(1, percent_pos - 1);
-                std::string vat_amount_str = line.substr(pipe_pos + 1);
-
-                // Trim whitespace
-                vat_rate_str.erase(0, vat_rate_str.find_first_not_of(" \t"));
-                vat_rate_str.erase(vat_rate_str.find_last_not_of(" \t") + 1);
-                vat_amount_str.erase(0, vat_amount_str.find_first_not_of(" \t"));
-                vat_amount_str.erase(vat_amount_str.find_last_not_of(" \t") + 1);
-
-                // Parse values
-                std::replace(vat_rate_str.begin(), vat_rate_str.end(), ',', '.');
-                std::replace(vat_amount_str.begin(), vat_amount_str.end(), ',', '.');
-
-                try {
-                    double vat_rate = std::stod(vat_rate_str) / 100.0;
-                    double vat_amount = std::stod(vat_amount_str);
-                    parsed_lines.push_back({operation, vat_amount, true, vat_rate, vat_amount, false});
-                } catch (...) {
-                    // Skip invalid VAT line
-                }
-                continue;
-            }
-
-            // Trim whitespace from value string
-            value_str.erase(0, value_str.find_first_not_of(" \t\r\n"));
-            value_str.erase(value_str.find_last_not_of(" \t\r\n") + 1);
-
-            // Parse the number (handle European format: period as thousands separator, comma as decimal)
-            // First remove all periods (thousands separators)
-            value_str.erase(std::remove(value_str.begin(), value_str.end(), '.'), value_str.end());
-            // Then replace comma with period (decimal separator for C locale)
-            std::replace(value_str.begin(), value_str.end(), ',', '.');
-
-            // Parse using C locale to ensure '.' is recognized as decimal separator
-            std::istringstream iss(value_str);
-            iss.imbue(std::locale("C"));
-            double value = 0.0;
-            if (iss >> value) {
-                parsed_lines.push_back({operation, value, false, 0.0, 0.0, false});
-            }
-        }
-
-        infile.close();
-
-        // Second pass: create tape entries with corrected operations
-        // The displayed operation is the one applied TO that value
-        // But TapeEntry stores the NEXT operation, so we need to shift
-        for (size_t i = 0; i < parsed_lines.size(); i++) {
-            const auto& curr = parsed_lines[i];
-
-            if (curr.is_separator) {
-                m_engine.loadTapeEntry(TapeEntry::separator());
-                continue;
-            }
-
-            // Determine the operation to store (the NEXT operation)
-            char next_operation = '\0';
-            if (i + 1 < parsed_lines.size() && !parsed_lines[i + 1].is_separator) {
-                next_operation = parsed_lines[i + 1].operation;
-            } else {
-                // Last entry before separator or end - use current operation
-                next_operation = curr.operation;
-            }
-
-            if (curr.is_vat) {
-                char vat_op = (curr.operation == '+') ? 'V' : 'v';
-                TapeEntry entry(curr.value, vat_op, "", true, curr.vat_rate, curr.vat_amount);
-                m_engine.loadTapeEntry(entry);
-            } else if (curr.operation != '=') {
-                TapeEntry entry(curr.value, next_operation, "", false);
-                m_engine.loadTapeEntry(entry);
-            } else {
-                // Result line
-                TapeEntry entry(curr.value, '=', "", false);
-                m_engine.loadTapeEntry(entry);
-            }
-        }
-
-        // Recalculate from loaded tape
-        m_engine.recalculateFromTape();
-
-        // Update displays
-        update_displays();
-
-        // Show EDIT button so Edit mode is available
-        m_edit_tape_button.set_visible(true);
-
-        // Add to recent files
-        add_recent_file(file_path);
-
-        // Update file state
-        m_current_file_path = file_path;
-        set_modified(false);
+void MainWindow::load_file(const std::string& file_path) {
+    // Check if file exists
+    if (!std::filesystem::exists(file_path)) {
+        auto dialog = Gtk::AlertDialog::create("File not found: " + file_path);
+        dialog->show(*this);
+        return;
     }
+
+    // Read file and parse tape entries
+    std::ifstream infile(file_path);
+    if (!infile.is_open()) {
+        auto dialog = Gtk::AlertDialog::create("Failed to open file: " + file_path);
+        dialog->show(*this);
+        return;
+    }
+
+    // Clear current tape
+    m_engine.clear();
+
+    // First pass: collect all lines and parse them
+    struct ParsedLine {
+        char operation;
+        double value;
+        bool is_vat;
+        double vat_rate;
+        double vat_amount;
+        bool is_separator;
+    };
+    std::vector<ParsedLine> parsed_lines;
+
+    std::string line;
+    while (std::getline(infile, line)) {
+        // Skip empty lines
+        if (line.empty()) continue;
+
+        // Check if it's a separator line
+        if (line.find("---") != std::string::npos) {
+            parsed_lines.push_back({' ', 0.0, false, 0.0, 0.0, true});
+            continue;
+        }
+
+        // Parse operation and value
+        if (line.length() < 3) continue;
+
+        char operation;
+
+        // Check for subtotal (ST)
+        if (line.length() >= 2 && line.substr(0, 2) == "ST") {
+            operation = 'S';
+        } else {
+            operation = line[0];
+        }
+
+        // Skip if not a valid operation
+        if (operation != '+' && operation != '-' && operation != '*' &&
+            operation != '/' && operation != '=' && operation != '%' && operation != 'S') {
+            continue;
+        }
+
+        // Extract the value (right side of the line)
+        std::string value_str;
+        size_t last_space = line.find_last_of(' ');
+        if (last_space != std::string::npos) {
+            value_str = line.substr(last_space + 1);
+        } else {
+            value_str = line.substr(1);
+        }
+
+        // Handle VAT lines (contains % and |)
+        if (line.find('%') != std::string::npos && line.find('|') != std::string::npos) {
+            size_t pipe_pos = line.find('|');
+            size_t percent_pos = line.find('%');
+
+            std::string vat_rate_str = line.substr(1, percent_pos - 1);
+            std::string vat_amount_str = line.substr(pipe_pos + 1);
+
+            // Trim whitespace
+            vat_rate_str.erase(0, vat_rate_str.find_first_not_of(" \t"));
+            vat_rate_str.erase(vat_rate_str.find_last_not_of(" \t") + 1);
+            vat_amount_str.erase(0, vat_amount_str.find_first_not_of(" \t"));
+            vat_amount_str.erase(vat_amount_str.find_last_not_of(" \t") + 1);
+
+            // Parse values
+            std::replace(vat_rate_str.begin(), vat_rate_str.end(), ',', '.');
+            std::replace(vat_amount_str.begin(), vat_amount_str.end(), ',', '.');
+
+            try {
+                double vat_rate = std::stod(vat_rate_str) / 100.0;
+                double vat_amount = std::stod(vat_amount_str);
+                parsed_lines.push_back({operation, vat_amount, true, vat_rate, vat_amount, false});
+            } catch (...) {
+                // Skip invalid VAT line
+            }
+            continue;
+        }
+
+        // Trim whitespace from value string
+        value_str.erase(0, value_str.find_first_not_of(" \t\r\n"));
+        value_str.erase(value_str.find_last_not_of(" \t\r\n") + 1);
+
+        // Parse the number (handle European format: period as thousands separator, comma as decimal)
+        value_str.erase(std::remove(value_str.begin(), value_str.end(), '.'), value_str.end());
+        std::replace(value_str.begin(), value_str.end(), ',', '.');
+
+        // Parse using C locale
+        std::istringstream iss(value_str);
+        iss.imbue(std::locale("C"));
+        double value = 0.0;
+        if (iss >> value) {
+            parsed_lines.push_back({operation, value, false, 0.0, 0.0, false});
+        }
+    }
+
+    infile.close();
+
+    // Second pass: create tape entries with corrected operations
+    for (size_t i = 0; i < parsed_lines.size(); i++) {
+        const auto& curr = parsed_lines[i];
+
+        if (curr.is_separator) {
+            m_engine.loadTapeEntry(TapeEntry::separator());
+            continue;
+        }
+
+        // Determine the operation to store (the NEXT operation)
+        char next_operation = '\0';
+        if (i + 1 < parsed_lines.size() && !parsed_lines[i + 1].is_separator) {
+            next_operation = parsed_lines[i + 1].operation;
+        } else {
+            next_operation = curr.operation;
+        }
+
+        if (curr.is_vat) {
+            char vat_op = (curr.operation == '+') ? 'V' : 'v';
+            TapeEntry entry(curr.value, vat_op, "", true, curr.vat_rate, curr.vat_amount);
+            m_engine.loadTapeEntry(entry);
+        } else if (curr.operation != '=') {
+            TapeEntry entry(curr.value, next_operation, "", false);
+            m_engine.loadTapeEntry(entry);
+        } else {
+            TapeEntry entry(curr.value, '=', "", false);
+            m_engine.loadTapeEntry(entry);
+        }
+    }
+
+    // Recalculate from loaded tape
+    m_engine.recalculateFromTape();
+
+    // Update displays
+    update_displays();
+
+    // Show EDIT button
+    m_edit_tape_button.set_visible(true);
+
+    // Add to recent files
+    add_recent_file(file_path);
+
+    // Update file state
+    m_current_file_path = file_path;
+    set_modified(false);
 }
 
 void MainWindow::setup_css() {
@@ -1190,6 +1095,37 @@ void MainWindow::on_equals_clicked() {
 }
 
 void MainWindow::on_clear_clicked() {
+    // Check if there's work to lose (tape has entries)
+    bool has_work = !m_engine.getTapeHistory().empty();
+
+    if (has_work) {
+        // Show confirmation dialog
+        auto dialog = Gtk::AlertDialog::create("Clear calculation?");
+        dialog->set_detail("This will clear the entire tape and cannot be undone.");
+        dialog->set_buttons({"Cancel", "Clear"});
+        dialog->set_cancel_button(0);
+        dialog->set_default_button(1);
+
+        dialog->choose(*this, [this](const Glib::RefPtr<Gio::AsyncResult>& result) {
+            auto dialog = std::dynamic_pointer_cast<Gtk::AlertDialog>(result->get_source_object_base());
+            try {
+                int button = dialog->choose_finish(result);
+
+                if (button == 1) {  // Clear
+                    perform_clear();
+                }
+                // button == 0 is Cancel, do nothing
+            } catch (const Gtk::DialogError& e) {
+                // User cancelled or closed dialog
+            }
+        });
+    } else {
+        // No work to lose, clear immediately
+        perform_clear();
+    }
+}
+
+void MainWindow::perform_clear() {
     // Exit edit mode first if active
     if (m_tape_edit_mode) {
         m_tape_edit_mode = false;
@@ -1258,23 +1194,24 @@ void MainWindow::on_decimal_places_changed() {
 }
 
 void MainWindow::on_save_tape_clicked() {
-    // Generate timestamped filename: calc-yymmdd-hhmm.txt
+    // Generate timestamped filename: yymmdd-hhmm.calc.txt
     auto now = std::chrono::system_clock::now();
     auto time_t_now = std::chrono::system_clock::to_time_t(now);
     std::tm* tm_now = std::localtime(&time_t_now);
 
     char filename_buf[32];
-    std::strftime(filename_buf, sizeof(filename_buf), "calc-%y%m%d-%H%M.txt", tm_now);
+    std::strftime(filename_buf, sizeof(filename_buf), "%y%m%d-%H%M.calc.txt", tm_now);
     std::string suggested_filename(filename_buf);
 
     auto dialog = Gtk::FileDialog::create();
     dialog->set_title("Save Calculation Tape");
     dialog->set_initial_name(suggested_filename);
 
-    // Set text file filter
+    // Set file filter
     auto filter = Gtk::FileFilter::create();
-    filter->set_name("Text files");
-    filter->add_pattern("*.txt");
+    filter->set_name("Tape Calculator files");
+    filter->add_pattern("*.calc.txt");
+    filter->add_pattern("*.txt");  // Backward compatibility
     auto filters = Gio::ListStore<Gtk::FileFilter>::create();
     filters->append(filter);
     dialog->set_filters(filters);
@@ -1356,26 +1293,38 @@ void MainWindow::update_tape() {
             tape_text += line.str();
         } else {
             // Format regular entry using PREVIOUS operation (what will be applied to this value)
-            // Exception: result lines use '='
-            char display_op = (entry.operation == '=') ? '=' : previous_operation;
+            // Exception: result lines use '=' and subtotals use 'ST'
+            std::string display_op;
+            if (entry.operation == '=') {
+                display_op = "=";
+            } else if (entry.operation == 'S') {
+                display_op = "ST";
+            } else {
+                display_op = std::string(1, previous_operation);
+            }
 
             std::ostringstream line;
             std::ostringstream num_str;
             num_str << std::fixed << std::setprecision(m_engine.getDecimalPlaces()) << entry.value;
 
-            line << display_op << std::right << std::setw(14) << num_str.str() << "\n";
+            line << std::left << std::setw(2) << display_op << std::right << std::setw(13) << num_str.str() << "\n";
 
             // Track lines with minus operations for red coloring
-            if (entry.operation != '=') {
+            if (entry.operation != '=' && entry.operation != 'S') {
                 if (previous_operation == '-') {
                     minus_lines.push_back(current_line);
                 }
                 // Update previous operation for next iteration
                 previous_operation = entry.operation;
-            } else {
+            } else if (entry.operation == '=') {
                 // This is the result line
                 result_line = current_line;
                 result_value = entry.value;
+            } else if (entry.operation == 'S') {
+                // This is a subtotal line - track it similarly to result
+                if (entry.value < 0) {
+                    minus_lines.push_back(current_line);
+                }
             }
 
             tape_text += line.str();
@@ -1836,12 +1785,12 @@ bool MainWindow::check_unsaved_changes() {
         return true;  // No unsaved changes, proceed
     }
 
-    // Create alert dialog
+    // Create alert dialog with 4 options
     auto dialog = Gtk::AlertDialog::create("Save changes?");
     dialog->set_detail("Do you want to save the changes before closing?");
-    dialog->set_buttons({"Cancel", "Don't Save", "Save"});
+    dialog->set_buttons({"Cancel", "Don't Save", "Save As...", "Save to History"});
     dialog->set_cancel_button(0);
-    dialog->set_default_button(2);
+    dialog->set_default_button(3);  // Default to "Save to History"
 
     // Show dialog synchronously (blocking)
     dialog->choose(*this, [this](const Glib::RefPtr<Gio::AsyncResult>& result) {
@@ -1849,13 +1798,15 @@ bool MainWindow::check_unsaved_changes() {
         try {
             int button = dialog->choose_finish(result);
 
-            if (button == 2) {  // Save
-                if (!m_current_file_path.empty()) {
-                    // Save to current file
-                    save_to_file(m_current_file_path);
-                } else {
-                    // No current file, trigger Save As
-                    on_action_save_as();
+            if (button == 3) {  // Save to History
+                save_to_history();
+                m_is_modified = false;
+                close();
+            } else if (button == 2) {  // Save As...
+                on_action_save_as();
+                // After save as dialog, check if saved and then close
+                if (!m_is_modified) {
+                    close();
                 }
             } else if (button == 1) {  // Don't Save
                 // Just close without saving
@@ -1901,6 +1852,45 @@ bool MainWindow::save_to_file(const std::string& file_path) {
         error_dialog->set_detail(e.what());
         error_dialog->show(*this);
         return false;
+    }
+}
+
+std::string MainWindow::get_history_path() {
+    const char* home = std::getenv("HOME");
+    if (!home) {
+        home = std::getenv("USERPROFILE"); // Windows fallback
+    }
+    if (!home) {
+        return "";
+    }
+
+    std::string history_dir = std::string(home) + "/.config/tape-calc/history";
+
+    // Create history directory if it doesn't exist
+    std::filesystem::create_directories(history_dir);
+
+    return history_dir;
+}
+
+void MainWindow::save_to_history() {
+    std::string history_dir = get_history_path();
+    if (history_dir.empty()) {
+        return;
+    }
+
+    // Generate timestamped filename
+    auto now = std::chrono::system_clock::now();
+    auto time_t_now = std::chrono::system_clock::to_time_t(now);
+    std::tm* tm_now = std::localtime(&time_t_now);
+
+    char filename_buf[32];
+    std::strftime(filename_buf, sizeof(filename_buf), "%y%m%d-%H%M%S.calc.txt", tm_now);
+
+    std::string file_path = history_dir + "/" + std::string(filename_buf);
+
+    // Save to history and add to recent files
+    if (save_to_file(file_path)) {
+        // File was saved successfully, it's already added to recent files by save_to_file
     }
 }
 

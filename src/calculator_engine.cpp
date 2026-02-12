@@ -74,6 +74,14 @@ void CalculatorEngine::performOperation(char op) {
 
     // Check if we're continuing from an equals result
     if (m_show_result) {
+        // Convert the last '=' entry to 'S' (subtotal) since we're continuing
+        if (!m_tape_history.empty()) {
+            auto& last_entry = m_tape_history.back();
+            if (last_entry.operation == '=') {
+                last_entry.operation = 'S';  // Convert to subtotal
+            }
+        }
+
         // Continue calculation with the result - don't add to tape again
         m_running_total = m_current_input;
         m_pending_operation = op;
@@ -330,6 +338,12 @@ void CalculatorEngine::recalculateFromTape() {
             m_running_total = entry.value;
             m_show_result = true;
             m_pending_operation = '\0';
+        }
+        // Handle subtotal entries
+        else if (entry.operation == 'S') {
+            m_running_total = entry.value;
+            m_pending_operation = '\0';
+            // Don't set show_result, so calculation can continue
         }
         // Handle VAT entries
         else if (entry.operation == 'V' || entry.operation == 'v') {

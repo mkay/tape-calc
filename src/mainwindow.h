@@ -10,6 +10,9 @@ public:
   MainWindow(const Glib::RefPtr<Gtk::Application>& app);
   ~MainWindow() override;
 
+  // Public methods
+  void load_file(const std::string& file_path);  // Load a file programmatically
+
 protected:
   // Application reference
   Glib::RefPtr<Gtk::Application> m_app;
@@ -99,6 +102,7 @@ protected:
   void on_action_open_recent(const std::string& file_path);
   void on_action_save();
   void on_action_save_as();
+  void on_action_browse_history();
   void on_action_new_window();
   void on_action_quit();
   void on_action_cut();
@@ -121,6 +125,11 @@ protected:
   void update_window_title();
   bool check_unsaved_changes();  // Returns false if user cancels
   bool save_to_file(const std::string& file_path);
+  void save_to_history();
+  std::string get_history_path();
+
+  // Clear helper
+  void perform_clear();
 
   // Window close handler
   bool on_close_request() override;

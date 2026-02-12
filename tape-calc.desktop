@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Tape Calculator
+GenericName=Calculator
+Comment=Professional tape calculator for accounting and financial calculations
+Exec=tape-calc %F
+Icon=tape-calc
+Terminal=false
+Categories=Utility;Calculator;Office;
+Keywords=calculator;tape;adding machine;accounting;finance;
+MimeType=text/plain;application/x-tape-calc;
+StartupNotify=true

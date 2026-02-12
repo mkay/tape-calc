@@ -9,11 +9,15 @@ A modern GTK4-based tape calculator with a professional adding machine interface
 - **Basic operations**: Addition, Subtraction, Multiplication, Division, Percentage
 - **VAT calculations**: Add/subtract VAT with configurable rates (e.g., `100 +VAT(19%)` → `119,00`)
 - **Editable tape** - modify operations and recalculate results
-- **File operations**: New, Open, Save, Save As with timestamped filenames (e.g., `calc-260212-1430.txt`)
+- **File operations**: New, Open, Save, Save As with timestamped filenames (e.g., `260212-1430.calc.txt`)
 - **Smart file tracking**: Modified indicator (*) in title bar, unsaved changes warning on close
 - **Quick Save**: Save to current file with Ctrl+S
+- **History feature**: Save to history folder for automatic archiving of calculations
 - **Open Recent**: Quickly access last 10 opened/saved calculations
+- **Browse History**: Browse and open past calculations from history folder
 - **Copy Total**: Copy result to clipboard with Shift+Ctrl+C
+- **Smart subtotals**: Automatically converts `=` to `ST` when continuing after a total
+- **Clear confirmation**: Prevents accidental data loss when pressing AC/Clear
 - **Full menu bar**: File, Edit, and Help menus with keyboard shortcuts
 - **Edit mode**: Enable Cut, Copy, Paste, and Select All operations when editing
 - **Configurable decimal places**: 0-6 decimal places
@@ -75,6 +79,31 @@ meson compile -C build
 ./build/tape-calc
 ```
 
+### Desktop Integration (Optional)
+
+Install the application with desktop menu integration and file associations:
+
+```bash
+# User installation (recommended)
+./install-desktop.sh
+
+# OR system-wide installation (requires root)
+sudo ./install-desktop.sh
+```
+
+This will:
+- Install the application to `~/.local/bin` (or `/usr/local/bin` for system-wide)
+- Add a launcher to your application menu
+- Associate `.calc.txt` files with Tape Calculator
+- Install application icons
+
+To uninstall:
+```bash
+./uninstall-desktop.sh
+# OR
+sudo ./uninstall-desktop.sh
+```
+
 ### Development Setup
 
 For Neovim users with LSP support:
@@ -113,15 +142,33 @@ Settings (VAT rate, decimal places, recent files) are automatically saved to `~/
 
 ### File Operations
 - **New**: Clear tape and start fresh (Ctrl+N or File > New)
+  - Confirmation dialog if there are unsaved calculations
 - **Open**: Load a saved calculation (Ctrl+O or File > Open)
 - **Open Recent**: Quick access to last 10 files (File > Open Recent)
 - **Save**: Quick save to current file (Ctrl+S or File > Save) - enabled when a file is open
 - **Save As**: Export with timestamped filename (Ctrl+Shift+S or File > Save As)
+- **Browse History**: Browse and open past calculations (File > Browse History)
+  - Opens file dialog in `~/.config/tape-calc/history/` folder
 
 **File Tracking:**
-- Title bar shows current filename: `Tape Calculator - calc-260212-1430.txt`
-- Modified indicator (*) appears when changes are unsaved: `Tape Calculator - calc-260212-1430.txt*`
-- Warning dialog when closing with unsaved changes (Save / Don't Save / Cancel)
+- Title bar shows current filename: `Tape Calculator - 260212-1430.calc.txt`
+- Modified indicator (*) appears when changes are unsaved: `Tape Calculator - 260212-1430.calc.txt*`
+- Enhanced unsaved changes dialog with 4 options:
+  - **Cancel** - Stay in the app
+  - **Don't Save** - Close without saving
+  - **Save As...** - Choose location with file dialog
+  - **Save to History** - Auto-save to history folder (default)
+
+**History Feature:**
+- Calculations can be saved to history folder: `~/.config/tape-calc/history/`
+- Filename format: `YYMMDD-HHMMSS.calc.txt` (e.g., `260212-173045.calc.txt`)
+- History files are automatically added to "Open Recent" menu
+- Use "Browse History" to explore all past calculations
+
+**File Format:**
+- Files use `.calc.txt` extension (plain text format)
+- Can be opened with any text editor
+- Backward compatible with old `.txt` files
 
 ### Editing the Tape
 1. Click **EDIT** (appears after pressing `=`) or use Edit > Edit Mode (Ctrl+E)
