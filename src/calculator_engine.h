@@ -45,6 +45,10 @@ public:
     void clearEntry();
     void undoLastEntry();
 
+    // Tape loading methods (for Open functionality)
+    void loadTapeEntry(const TapeEntry& entry);
+    void recalculateFromTape();
+
     // VAT operations
     void addVAT();
     void subtractVAT();

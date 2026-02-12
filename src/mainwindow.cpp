@@ -7,16 +7,20 @@
 #include <locale>
 #include <filesystem>
 #include <cstdlib>
+#include <chrono>
+#include <ctime>
 #include <gdk/gdkkeysyms.h>
 
-MainWindow::MainWindow()
-    : m_main_box(Gtk::Orientation::HORIZONTAL)
+MainWindow::MainWindow(const Glib::RefPtr<Gtk::Application>& app)
+    : m_app(app)
+    , m_outer_box(Gtk::Orientation::VERTICAL)
+    , m_main_box(Gtk::Orientation::HORIZONTAL)
     , m_left_panel(Gtk::Orientation::VERTICAL)
     , m_right_panel(Gtk::Orientation::VERTICAL)
-    , m_control_box(Gtk::Orientation::HORIZONTAL)
-    , m_vat_box(Gtk::Orientation::HORIZONTAL)
     , m_history_title_box(Gtk::Orientation::HORIZONTAL)
     , m_history_title("Calculation History")
+    , m_control_box(Gtk::Orientation::HORIZONTAL)
+    , m_vat_box(Gtk::Orientation::HORIZONTAL)
     , m_vat_rate_btn("19%")
     , m_add_vat_btn("+VAT")
     , m_subtract_vat_btn("-VAT")
@@ -28,6 +32,9 @@ MainWindow::MainWindow()
 {
     set_title(APPNAME);
     set_default_size(WIDTH, HEIGHT);
+
+    // Setup menu actions
+    setup_menu();
 
     // Setup CSS styling
     setup_css();
@@ -251,7 +258,11 @@ MainWindow::MainWindow()
     // Fix width but allow height to resize
     m_main_box.set_size_request(WIDTH, -1);
 
-    set_child(m_main_box);
+    // Assemble outer layout with menu bar
+    m_outer_box.append(m_main_box);
+    m_outer_box.set_spacing(0);
+
+    set_child(m_outer_box);
 
     // Setup keyboard event controller
     auto key_controller = Gtk::EventControllerKey::create();
@@ -268,6 +279,587 @@ MainWindow::MainWindow()
 }
 
 MainWindow::~MainWindow() {}
+
+void MainWindow::setup_menu() {
+    // Create edit mode action (always enabled)
+    auto action_edit_mode = Gio::SimpleAction::create("edit-mode");
+    action_edit_mode->signal_activate().connect(sigc::hide(sigc::mem_fun(*this, &MainWindow::on_action_edit_mode)));
+    m_app->add_action(action_edit_mode);
+
+    // Create file actions (always enabled)
+    auto action_new = Gio::SimpleAction::create("new");
+    action_new->signal_activate().connect(sigc::hide(sigc::mem_fun(*this, &MainWindow::on_action_new)));
+    m_app->add_action(action_new);
+
+    auto action_open = Gio::SimpleAction::create("open");
+    action_open->signal_activate().connect(sigc::hide(sigc::mem_fun(*this, &MainWindow::on_action_open)));
+    m_app->add_action(action_open);
+
+    auto action_save_as = Gio::SimpleAction::create("save-as");
+    action_save_as->signal_activate().connect(sigc::hide(sigc::mem_fun(*this, &MainWindow::on_action_save_as)));
+    m_app->add_action(action_save_as);
+
+    auto action_new_window = Gio::SimpleAction::create("new-window");
+    action_new_window->signal_activate().connect(sigc::hide(sigc::mem_fun(*this, &MainWindow::on_action_new_window)));
+    m_app->add_action(action_new_window);
+
+    auto action_quit = Gio::SimpleAction::create("quit");
+    action_quit->signal_activate().connect(sigc::hide(sigc::mem_fun(*this, &MainWindow::on_action_quit)));
+    m_app->add_action(action_quit);
+
+    // Create edit actions (initially disabled)
+    auto action_undo = Gio::SimpleAction::create("undo");
+    action_undo->signal_activate().connect(sigc::hide(sigc::mem_fun(*this, &MainWindow::on_action_undo)));
+    action_undo->set_enabled(false);
+    m_app->add_action(action_undo);
+
+    auto action_redo = Gio::SimpleAction::create("redo");
+    action_redo->signal_activate().connect(sigc::hide(sigc::mem_fun(*this, &MainWindow::on_action_redo)));
+    action_redo->set_enabled(false);
+    m_app->add_action(action_redo);
+
+    auto action_cut = Gio::SimpleAction::create("cut");
+    action_cut->signal_activate().connect(sigc::hide(sigc::mem_fun(*this, &MainWindow::on_action_cut)));
+    action_cut->set_enabled(false);
+    m_app->add_action(action_cut);
+
+    auto action_copy = Gio::SimpleAction::create("copy");
+    action_copy->signal_activate().connect(sigc::hide(sigc::mem_fun(*this, &MainWindow::on_action_copy)));
+    action_copy->set_enabled(false);
+    m_app->add_action(action_copy);
+
+    auto action_paste = Gio::SimpleAction::create("paste");
+    action_paste->signal_activate().connect(sigc::hide(sigc::mem_fun(*this, &MainWindow::on_action_paste)));
+    action_paste->set_enabled(false);
+    m_app->add_action(action_paste);
+
+    auto action_select_all = Gio::SimpleAction::create("select-all");
+    action_select_all->signal_activate().connect(sigc::hide(sigc::mem_fun(*this, &MainWindow::on_action_select_all)));
+    action_select_all->set_enabled(false);
+    m_app->add_action(action_select_all);
+
+    auto action_documentation = Gio::SimpleAction::create("documentation");
+    action_documentation->signal_activate().connect(sigc::hide(sigc::mem_fun(*this, &MainWindow::on_action_documentation)));
+    m_app->add_action(action_documentation);
+
+    // Set keyboard accelerators
+    m_app->set_accel_for_action("app.edit-mode", "<Primary>e");
+    m_app->set_accel_for_action("app.new", "<Primary>n");
+    m_app->set_accel_for_action("app.open", "<Primary>o");
+    m_app->set_accel_for_action("app.save-as", "<Primary><Shift>s");
+    m_app->set_accel_for_action("app.new-window", "<Primary><Shift>n");
+    m_app->set_accel_for_action("app.quit", "<Primary>q");
+    m_app->set_accel_for_action("app.undo", "<Primary>z");
+    m_app->set_accel_for_action("app.redo", "<Primary><Shift>z");
+    m_app->set_accel_for_action("app.cut", "<Primary>x");
+    m_app->set_accel_for_action("app.copy", "<Primary>c");
+    m_app->set_accel_for_action("app.paste", "<Primary>v");
+    m_app->set_accel_for_action("app.select-all", "<Primary>a");
+
+    // Create menu bar
+    auto menu_bar = Gio::Menu::create();
+
+    // File menu
+    auto file_menu = Gio::Menu::create();
+    file_menu->append("_New", "app.new");
+    file_menu->append("_Open...", "app.open");
+
+    // Create recent files submenu
+    m_recent_files_menu = Gio::Menu::create();
+    file_menu->append_submenu("Open _Recent", m_recent_files_menu);
+
+    file_menu->append("Save _As...", "app.save-as");
+    file_menu->append("New _Window", "app.new-window");
+    file_menu->append("_Quit", "app.quit");
+    menu_bar->append_submenu("_File", file_menu);
+
+    // Load recent files and populate menu
+    load_recent_files();
+    update_recent_files_menu();
+
+    // Edit menu
+    auto edit_menu = Gio::Menu::create();
+    edit_menu->append("_Edit Mode", "app.edit-mode");
+    edit_menu->append("_Undo", "app.undo");
+    edit_menu->append("_Redo", "app.redo");
+    edit_menu->append("Cu_t", "app.cut");
+    edit_menu->append("_Copy", "app.copy");
+    edit_menu->append("_Paste", "app.paste");
+    edit_menu->append("Select _All", "app.select-all");
+    menu_bar->append_submenu("_Edit", edit_menu);
+
+    // Help menu
+    auto help_menu = Gio::Menu::create();
+    help_menu->append("_Documentation", "app.documentation");
+    menu_bar->append_submenu("_Help", help_menu);
+
+    // Create menu bar widget
+    auto menu_bar_widget = Gtk::make_managed<Gtk::PopoverMenuBar>(menu_bar);
+    m_outer_box.prepend(*menu_bar_widget);
+}
+
+void MainWindow::update_edit_menu_sensitivity() {
+    // Enable/disable edit menu items based on edit mode
+    bool in_edit_mode = m_tape_edit_mode;
+
+    auto action_undo = std::dynamic_pointer_cast<Gio::SimpleAction>(m_app->lookup_action("undo"));
+    if (action_undo) action_undo->set_enabled(in_edit_mode);
+
+    auto action_redo = std::dynamic_pointer_cast<Gio::SimpleAction>(m_app->lookup_action("redo"));
+    if (action_redo) action_redo->set_enabled(in_edit_mode);
+
+    auto action_cut = std::dynamic_pointer_cast<Gio::SimpleAction>(m_app->lookup_action("cut"));
+    if (action_cut) action_cut->set_enabled(in_edit_mode);
+
+    auto action_copy = std::dynamic_pointer_cast<Gio::SimpleAction>(m_app->lookup_action("copy"));
+    if (action_copy) action_copy->set_enabled(in_edit_mode);
+
+    auto action_paste = std::dynamic_pointer_cast<Gio::SimpleAction>(m_app->lookup_action("paste"));
+    if (action_paste) action_paste->set_enabled(in_edit_mode);
+
+    auto action_select_all = std::dynamic_pointer_cast<Gio::SimpleAction>(m_app->lookup_action("select-all"));
+    if (action_select_all) action_select_all->set_enabled(in_edit_mode);
+}
+
+// Menu action handlers
+void MainWindow::on_action_edit_mode() {
+    // Toggle edit mode by triggering the edit button
+    if (m_edit_tape_button.get_visible()) {
+        on_edit_tape_clicked();
+        update_edit_menu_sensitivity();
+    }
+}
+
+void MainWindow::on_action_new() {
+    on_clear_clicked();
+}
+
+void MainWindow::on_action_open() {
+    auto dialog = Gtk::FileDialog::create();
+    dialog->set_title("Open Tape File");
+
+    // Set up file filters
+    auto filter = Gtk::FileFilter::create();
+    filter->set_name("Text files");
+    filter->add_pattern("*.txt");
+    auto filters = Gio::ListStore<Gtk::FileFilter>::create();
+    filters->append(filter);
+    dialog->set_filters(filters);
+
+    dialog->open(*this, [this](const Glib::RefPtr<Gio::AsyncResult>& result) {
+        try {
+            auto file = std::dynamic_pointer_cast<Gtk::FileDialog>(result->get_source_object_base())->open_finish(result);
+            auto path = file->get_path();
+
+            // Read file and parse tape entries
+            std::ifstream infile(path);
+            if (infile.is_open()) {
+                // Clear current tape
+                m_engine.clear();
+
+                std::string line;
+                while (std::getline(infile, line)) {
+                    // Skip empty lines
+                    if (line.empty()) continue;
+
+                    // Check if it's a separator line
+                    if (line.find("---") != std::string::npos) {
+                        m_engine.loadTapeEntry(TapeEntry::separator());
+                        continue;
+                    }
+
+                    // Parse operation and value
+                    // Format: "operation   value" (operation left-aligned, value right-aligned)
+                    if (line.length() < 3) continue;
+
+                    char operation = line[0];
+
+                    // Skip if not a valid operation
+                    if (operation != '+' && operation != '-' && operation != '*' &&
+                        operation != '/' && operation != '=' && operation != '%') {
+                        continue;
+                    }
+
+                    // Extract the value (right side of the line)
+                    std::string value_str;
+                    size_t last_space = line.find_last_of(' ');
+                    if (last_space != std::string::npos) {
+                        value_str = line.substr(last_space + 1);
+                    } else {
+                        value_str = line.substr(1);
+                    }
+
+                    // Handle VAT lines (contains % and |)
+                    if (line.find('%') != std::string::npos && line.find('|') != std::string::npos) {
+                        // Format: "+         19% | 19,00"
+                        // Extract VAT rate and amount
+                        size_t pipe_pos = line.find('|');
+                        size_t percent_pos = line.find('%');
+
+                        std::string vat_rate_str = line.substr(1, percent_pos - 1);
+                        std::string vat_amount_str = line.substr(pipe_pos + 1);
+
+                        // Trim whitespace
+                        vat_rate_str.erase(0, vat_rate_str.find_first_not_of(" \t"));
+                        vat_rate_str.erase(vat_rate_str.find_last_not_of(" \t") + 1);
+                        vat_amount_str.erase(0, vat_amount_str.find_first_not_of(" \t"));
+                        vat_amount_str.erase(vat_amount_str.find_last_not_of(" \t") + 1);
+
+                        // Parse values (replace comma with period for parsing)
+                        std::replace(vat_rate_str.begin(), vat_rate_str.end(), ',', '.');
+                        std::replace(vat_amount_str.begin(), vat_amount_str.end(), ',', '.');
+
+                        try {
+                            double vat_rate = std::stod(vat_rate_str) / 100.0;
+                            double vat_amount = std::stod(vat_amount_str);
+
+                            // Create VAT entry
+                            char vat_op = (operation == '+') ? 'V' : 'v';
+                            TapeEntry entry(vat_amount, vat_op, "", true, vat_rate, vat_amount);
+                            m_engine.loadTapeEntry(entry);
+                        } catch (...) {
+                            // Skip invalid VAT line
+                        }
+                        continue;
+                    }
+
+                    // Parse regular value (replace comma with period for parsing)
+                    std::replace(value_str.begin(), value_str.end(), ',', '.');
+
+                    try {
+                        double value = std::stod(value_str);
+
+                        // Create tape entry
+                        TapeEntry entry(value, operation, "", false);
+                        m_engine.loadTapeEntry(entry);
+                    } catch (...) {
+                        // Skip invalid line
+                    }
+                }
+
+                infile.close();
+
+                // Recalculate from loaded tape
+                m_engine.recalculateFromTape();
+
+                // Update displays
+                update_displays();
+
+                // Show EDIT button so Edit mode is available
+                m_edit_tape_button.set_visible(true);
+
+                // Add to recent files
+                add_recent_file(path);
+            }
+        } catch (const Glib::Error& e) {
+            // User cancelled or error occurred
+        }
+    });
+}
+
+void MainWindow::on_action_save_as() {
+    on_save_tape_clicked();
+}
+
+void MainWindow::on_action_new_window() {
+    auto window = new MainWindow(m_app);
+    m_app->add_window(*window);
+    window->set_hide_on_close(false);
+    window->present();
+}
+
+void MainWindow::on_action_quit() {
+    m_app->quit();
+}
+
+void MainWindow::on_action_undo() {
+    on_backspace_clicked();
+}
+
+void MainWindow::on_action_redo() {
+    // Redo functionality not yet implemented
+    // Would need to add redo history to calculator engine
+}
+
+void MainWindow::on_action_cut() {
+    // Cut selected text from tape view
+    auto clipboard = get_clipboard();
+    m_tape_buffer->cut_clipboard(clipboard, true);
+}
+
+void MainWindow::on_action_copy() {
+    // Copy selected text from tape view
+    auto clipboard = get_clipboard();
+    m_tape_buffer->copy_clipboard(clipboard);
+}
+
+void MainWindow::on_action_paste() {
+    // Paste is not very useful in a calculator, but we can support it
+    // This would paste into the tape view if it's editable (edit mode)
+    if (m_tape_edit_mode) {
+        auto clipboard = get_clipboard();
+        m_tape_buffer->paste_clipboard(clipboard);
+    }
+}
+
+void MainWindow::on_action_select_all() {
+    // Select all text in tape view
+    m_tape_buffer->select_range(m_tape_buffer->begin(), m_tape_buffer->end());
+}
+
+void MainWindow::on_action_documentation() {
+    // Open documentation URL in default browser
+    auto launcher = Gtk::UriLauncher::create("https://github.com/mkay/tape-calc");
+    launcher->launch(*this, [](const Glib::RefPtr<Gio::AsyncResult>&) {
+        // Callback - we don't need to do anything when the URL is launched
+    });
+}
+
+// Recent files management
+void MainWindow::add_recent_file(const std::string& path) {
+    // Remove if already exists
+    auto it = std::find(m_recent_files.begin(), m_recent_files.end(), path);
+    if (it != m_recent_files.end()) {
+        m_recent_files.erase(it);
+    }
+
+    // Add to front
+    m_recent_files.insert(m_recent_files.begin(), path);
+
+    // Keep only last 10
+    if (m_recent_files.size() > 10) {
+        m_recent_files.resize(10);
+    }
+
+    // Save and update menu
+    save_recent_files();
+    update_recent_files_menu();
+}
+
+void MainWindow::load_recent_files() {
+    m_recent_files.clear();
+
+    std::string config_path = get_config_path();
+    std::ifstream config_file(config_path);
+    if (!config_file.is_open()) {
+        return;
+    }
+
+    std::string line;
+    while (std::getline(config_file, line)) {
+        if (line.substr(0, 12) == "recent_file=") {
+            std::string file_path = line.substr(12);
+            // Only add if file still exists
+            if (std::filesystem::exists(file_path)) {
+                m_recent_files.push_back(file_path);
+            }
+        }
+    }
+    config_file.close();
+}
+
+void MainWindow::save_recent_files() {
+    std::string config_path = get_config_path();
+
+    // Read existing settings
+    std::map<std::string, std::string> settings;
+    std::ifstream config_file(config_path);
+    if (config_file.is_open()) {
+        std::string line;
+        while (std::getline(config_file, line)) {
+            size_t pos = line.find('=');
+            if (pos != std::string::npos && line.substr(0, 12) != "recent_file=") {
+                std::string key = line.substr(0, pos);
+                std::string value = line.substr(pos + 1);
+                settings[key] = value;
+            }
+        }
+        config_file.close();
+    }
+
+    // Write settings with recent files
+    std::ofstream out_file(config_path);
+    if (out_file.is_open()) {
+        // Write non-recent settings
+        for (const auto& [key, value] : settings) {
+            out_file << key << "=" << value << "\n";
+        }
+        // Write recent files
+        for (const auto& file : m_recent_files) {
+            out_file << "recent_file=" << file << "\n";
+        }
+        out_file.close();
+    }
+}
+
+void MainWindow::update_recent_files_menu() {
+    // Clear existing menu items
+    m_recent_files_menu->remove_all();
+
+    if (m_recent_files.empty()) {
+        // Add a disabled "No recent files" item
+        auto no_files_item = Gio::MenuItem::create("No recent files", "");
+        m_recent_files_menu->append_item(no_files_item);
+        return;
+    }
+
+    // Add menu items for each recent file
+    for (size_t i = 0; i < m_recent_files.size(); ++i) {
+        const auto& file_path = m_recent_files[i];
+
+        // Extract filename for display
+        std::filesystem::path path(file_path);
+        std::string display_name = path.filename().string();
+
+        // Create action name
+        std::string action_name = "recent-" + std::to_string(i);
+
+        // Remove old action if it exists
+        m_app->remove_action(action_name);
+
+        // Create action
+        auto action = Gio::SimpleAction::create(action_name);
+        action->signal_activate().connect([this, file_path](const Glib::VariantBase&) {
+            on_action_open_recent(file_path);
+        });
+        m_app->add_action(action);
+
+        // Add menu item
+        m_recent_files_menu->append(display_name, "app." + action_name);
+    }
+
+    // Add separator and "Clear List" option
+    auto separator_section = Gio::Menu::create();
+
+    // Create "Clear List" action if it doesn't exist
+    if (!m_app->lookup_action("clear-recent")) {
+        auto clear_action = Gio::SimpleAction::create("clear-recent");
+        clear_action->signal_activate().connect(sigc::hide(sigc::mem_fun(*this, &MainWindow::clear_recent_files)));
+        m_app->add_action(clear_action);
+    }
+
+    separator_section->append("Clear List", "app.clear-recent");
+    m_recent_files_menu->append_section("", separator_section);
+}
+
+void MainWindow::clear_recent_files() {
+    m_recent_files.clear();
+    save_recent_files();
+    update_recent_files_menu();
+}
+
+void MainWindow::on_action_open_recent(const std::string& file_path) {
+    // Check if file still exists
+    if (!std::filesystem::exists(file_path)) {
+        // Show error dialog
+        auto dialog = Gtk::AlertDialog::create("File not found: " + file_path);
+        dialog->show(*this);
+
+        // Remove from recent files
+        auto it = std::find(m_recent_files.begin(), m_recent_files.end(), file_path);
+        if (it != m_recent_files.end()) {
+            m_recent_files.erase(it);
+            save_recent_files();
+            update_recent_files_menu();
+        }
+        return;
+    }
+
+    // Read file and parse tape entries (same as on_action_open)
+    std::ifstream infile(file_path);
+    if (infile.is_open()) {
+        // Clear current tape
+        m_engine.clear();
+
+        std::string line;
+        while (std::getline(infile, line)) {
+            // Skip empty lines
+            if (line.empty()) continue;
+
+            // Check if it's a separator line
+            if (line.find("---") != std::string::npos) {
+                m_engine.loadTapeEntry(TapeEntry::separator());
+                continue;
+            }
+
+            // Parse operation and value
+            if (line.length() < 3) continue;
+
+            char operation = line[0];
+
+            // Skip if not a valid operation
+            if (operation != '+' && operation != '-' && operation != '*' &&
+                operation != '/' && operation != '=' && operation != '%') {
+                continue;
+            }
+
+            // Extract the value (right side of the line)
+            std::string value_str;
+            size_t last_space = line.find_last_of(' ');
+            if (last_space != std::string::npos) {
+                value_str = line.substr(last_space + 1);
+            } else {
+                value_str = line.substr(1);
+            }
+
+            // Handle VAT lines (contains % and |)
+            if (line.find('%') != std::string::npos && line.find('|') != std::string::npos) {
+                size_t pipe_pos = line.find('|');
+                size_t percent_pos = line.find('%');
+
+                std::string vat_rate_str = line.substr(1, percent_pos - 1);
+                std::string vat_amount_str = line.substr(pipe_pos + 1);
+
+                // Trim whitespace
+                vat_rate_str.erase(0, vat_rate_str.find_first_not_of(" \t"));
+                vat_rate_str.erase(vat_rate_str.find_last_not_of(" \t") + 1);
+                vat_amount_str.erase(0, vat_amount_str.find_first_not_of(" \t"));
+                vat_amount_str.erase(vat_amount_str.find_last_not_of(" \t") + 1);
+
+                // Parse values
+                std::replace(vat_rate_str.begin(), vat_rate_str.end(), ',', '.');
+                std::replace(vat_amount_str.begin(), vat_amount_str.end(), ',', '.');
+
+                try {
+                    double vat_rate = std::stod(vat_rate_str) / 100.0;
+                    double vat_amount = std::stod(vat_amount_str);
+
+                    char vat_op = (operation == '+') ? 'V' : 'v';
+                    TapeEntry entry(vat_amount, vat_op, "", true, vat_rate, vat_amount);
+                    m_engine.loadTapeEntry(entry);
+                } catch (...) {
+                    // Skip invalid VAT line
+                }
+                continue;
+            }
+
+            // Parse regular value
+            std::replace(value_str.begin(), value_str.end(), ',', '.');
+
+            try {
+                double value = std::stod(value_str);
+                TapeEntry entry(value, operation, "", false);
+                m_engine.loadTapeEntry(entry);
+            } catch (...) {
+                // Skip invalid line
+            }
+        }
+
+        infile.close();
+
+        // Recalculate from loaded tape
+        m_engine.recalculateFromTape();
+
+        // Update displays
+        update_displays();
+
+        // Show EDIT button so Edit mode is available
+        m_edit_tape_button.set_visible(true);
+
+        // Add to recent files
+        add_recent_file(file_path);
+    }
+}
 
 void MainWindow::setup_css() {
     m_css_provider = Gtk::CssProvider::create();
@@ -549,9 +1141,18 @@ void MainWindow::on_decimal_places_changed() {
 }
 
 void MainWindow::on_save_tape_clicked() {
+    // Generate timestamped filename: calc-yymmdd-hhmm.txt
+    auto now = std::chrono::system_clock::now();
+    auto time_t_now = std::chrono::system_clock::to_time_t(now);
+    std::tm* tm_now = std::localtime(&time_t_now);
+
+    char filename_buf[32];
+    std::strftime(filename_buf, sizeof(filename_buf), "calc-%y%m%d-%H%M.txt", tm_now);
+    std::string suggested_filename(filename_buf);
+
     auto dialog = Gtk::FileDialog::create();
     dialog->set_title("Save Calculation Tape");
-    dialog->set_initial_name("calculation_tape.txt");
+    dialog->set_initial_name(suggested_filename);
 
     // Set text file filter
     auto filter = Gtk::FileFilter::create();
@@ -569,10 +1170,14 @@ void MainWindow::on_save_tape_clicked() {
                 std::string tape_content = m_tape_buffer->get_text();
 
                 // Write to file
-                std::ofstream outfile(file->get_path());
+                std::string file_path = file->get_path();
+                std::ofstream outfile(file_path);
                 if (outfile.is_open()) {
                     outfile << tape_content;
                     outfile.close();
+
+                    // Add to recent files
+                    add_recent_file(file_path);
                 }
             }
         } catch (const Gtk::DialogError& err) {
@@ -750,6 +1355,9 @@ void MainWindow::on_edit_tape_clicked() {
         // Add visual feedback
         m_edit_tape_button.add_css_class("active");
         m_tape_view.add_css_class("edit-mode");
+
+        // Update menu sensitivity
+        update_edit_menu_sensitivity();
     } else {
         // Exit edit mode and recalculate
         m_tape_edit_mode = false;
@@ -760,6 +1368,9 @@ void MainWindow::on_edit_tape_clicked() {
         // Remove visual feedback
         m_edit_tape_button.remove_css_class("active");
         m_tape_view.remove_css_class("edit-mode");
+
+        // Update menu sensitivity
+        update_edit_menu_sensitivity();
 
         // Parse the edited tape and recalculate everything
         std::string tape_text = m_tape_buffer->get_text();
@@ -879,17 +1490,11 @@ void MainWindow::on_edit_tape_clicked() {
 }
 
 bool MainWindow::on_key_pressed(guint keyval, guint keycode, Gdk::ModifierType state) {
-    // Handle Ctrl+N to open new window
+    // Handle Ctrl+N to open new window - now handled by menu action
     if ((state & Gdk::ModifierType::CONTROL_MASK) != Gdk::ModifierType{} &&
         (keyval == GDK_KEY_n || keyval == GDK_KEY_N)) {
-        auto app = get_application();
-        if (app) {
-            auto window = new MainWindow();
-            app->add_window(*window);
-            window->set_hide_on_close(false);
-            window->present();
-        }
-        return true;
+        // This is now handled by the menu action
+        return false;  // Let the action handle it
     }
 
     // Handle Ctrl+Q to quit

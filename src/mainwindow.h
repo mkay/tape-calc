@@ -7,14 +7,18 @@
 class MainWindow : public Gtk::Window
 {
 public:
-  MainWindow();
+  MainWindow(const Glib::RefPtr<Gtk::Application>& app);
   ~MainWindow() override;
 
 protected:
+  // Application reference
+  Glib::RefPtr<Gtk::Application> m_app;
+
   // Calculator engine
   CalculatorEngine m_engine;
 
   // Main layout
+  Gtk::Box m_outer_box;  // Outer box to contain menu bar and main content
   Gtk::Box m_main_box;
   Gtk::Box m_left_panel;
   Gtk::Box m_right_panel;
@@ -77,6 +81,33 @@ protected:
   void create_number_button(int number, int row, int col);
   void create_operation_button(const Glib::ustring& label, char op, int row, int col);
 
+  // Menu setup
+  void setup_menu();
+  void update_edit_menu_sensitivity();
+  void update_recent_files_menu();
+
+  // Recent files management
+  void add_recent_file(const std::string& path);
+  void load_recent_files();
+  void save_recent_files();
+  void clear_recent_files();
+
+  // Menu action handlers
+  void on_action_edit_mode();
+  void on_action_new();
+  void on_action_open();
+  void on_action_open_recent(const std::string& file_path);
+  void on_action_save_as();
+  void on_action_new_window();
+  void on_action_quit();
+  void on_action_undo();
+  void on_action_redo();
+  void on_action_cut();
+  void on_action_copy();
+  void on_action_paste();
+  void on_action_select_all();
+  void on_action_documentation();
+
   // Settings methods
   void load_settings();
   void save_settings();
@@ -88,6 +119,8 @@ protected:
 private:
   bool m_updating_tape;
   bool m_tape_edit_mode;
+  std::vector<std::string> m_recent_files;
+  Glib::RefPtr<Gio::Menu> m_recent_files_menu;
 };
 
 #endif

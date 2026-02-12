@@ -307,6 +307,61 @@ void CalculatorEngine::undoLastEntry() {
     }
 }
 
+void CalculatorEngine::loadTapeEntry(const TapeEntry& entry) {
+    m_tape_history.push_back(entry);
+}
+
+void CalculatorEngine::recalculateFromTape() {
+    // Reset calculation state
+    m_running_total = 0.0;
+    m_pending_operation = '\0';
+    m_has_error = false;
+    m_show_result = false;
+    m_new_number_started = false;
+
+    // Replay tape to recalculate running total
+    for (const auto& entry : m_tape_history) {
+        if (entry.is_separator) {
+            continue;
+        }
+
+        // Handle result entries
+        if (entry.operation == '=') {
+            m_running_total = entry.value;
+            m_show_result = true;
+            m_pending_operation = '\0';
+        }
+        // Handle VAT entries
+        else if (entry.operation == 'V' || entry.operation == 'v') {
+            // VAT entries contain the result value directly
+            m_running_total = entry.value;
+        }
+        // Handle regular operations
+        else {
+            if (m_pending_operation == '\0') {
+                m_running_total = entry.value;
+            } else {
+                switch (m_pending_operation) {
+                    case '+': m_running_total += entry.value; break;
+                    case '-': m_running_total -= entry.value; break;
+                    case '*': m_running_total *= entry.value; break;
+                    case '/':
+                        if (entry.value != 0.0) {
+                            m_running_total /= entry.value;
+                        } else {
+                            m_has_error = true;
+                        }
+                        break;
+                }
+            }
+            m_pending_operation = entry.operation;
+        }
+    }
+
+    m_input_buffer = formatNumber(m_running_total);
+    m_new_number_started = true;
+}
+
 std::string CalculatorEngine::getCurrentInput() const {
     return m_input_buffer;
 }
